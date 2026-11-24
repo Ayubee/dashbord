@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Davomat (Face ID)</title>
+<script>
+  // mavzu: saqlangan tanlov, bo'lmasa tizim sozlamasi (sahifa miltillamasligi uchun boshida)
+  (function(){ var t; try{ t = localStorage.getItem("davomat-theme"); }catch(e){}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t; })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---- QORONG'I (standart) */
+:root{
+  --bg:#0e0f11;
+  --bgfx:radial-gradient(1000px 700px at 28% 12%, rgba(255,255,255,.07), transparent 62%),
+         radial-gradient(900px 650px at 88% 85%, rgba(150,165,195,.07), transparent 62%);
+  --text:#f2f3f5; --muted:rgba(242,243,245,.58); --faint:rgba(242,243,245,.32);
+  --g1:rgba(255,255,255,.05); --g2:rgba(255,255,255,.085); --g3:rgba(255,255,255,.14);
+  --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.18); --hi:rgba(255,255,255,.20);
+  --glass-bg:linear-gradient(160deg,rgba(255,255,255,.085),rgba(255,255,255,.03));
+  --card-bg:linear-gradient(160deg,rgba(255,255,255,.075),rgba(255,255,255,.028));
+  --card-bg-h:linear-gradient(160deg,rgba(255,255,255,.11),rgba(255,255,255,.045));
+  --modal-bg:linear-gradient(160deg,rgba(44,46,52,.82),rgba(24,25,29,.86));
+  --row:rgba(255,255,255,.045); --row-h:rgba(255,255,255,.09); --row-a:rgba(255,255,255,.02); --we:rgba(0,0,0,.2);
+  --input:rgba(0,0,0,.28); --input-f:rgba(0,0,0,.4); --opt:#1c1d21; --scheme:dark;
+  --btn-bg:#ffffff; --btn-fg:#111215;
+  --side:#0a0a0a;
+  --teal:#5fd4c4; --lime:#d6f25c; --green:#8fe38a; --orange:#ffb35e; --red:#ff7b6e;
+  --blur:blur(28px) saturate(160%);
+  --shadow:0 10px 40px rgba(0,0,0,.30), inset 0 1px 0 var(--hi);
+}
+/* ---- YORUG' */
+:root[data-theme="light"]{
+  --bg:#e8ebf0;
+  --bgfx:radial-gradient(1000px 700px at 28% 12%, rgba(255,255,255,.95), transparent 62%),
+         radial-gradient(900px 650px at 88% 85%, rgba(190,200,220,.45), transparent 62%);
+  --text:#15171c; --muted:rgba(21,23,28,.58); --faint:rgba(21,23,28,.34);
+  --g1:rgba(20,25,40,.035); --g2:rgba(20,25,40,.06); --g3:rgba(255,255,255,.95);
+  --line:rgba(20,25,40,.09); --line2:rgba(20,25,40,.16); --hi:rgba(255,255,255,.95);
+  --glass-bg:linear-gradient(160deg,rgba(255,255,255,.72),rgba(255,255,255,.42));
+  --card-bg:linear-gradient(160deg,rgba(255,255,255,.80),rgba(255,255,255,.50));
+  --card-bg-h:linear-gradient(160deg,rgba(255,255,255,.95),rgba(255,255,255,.65));
+  --modal-bg:linear-gradient(160deg,rgba(255,255,255,.92),rgba(244,246,250,.88));
+  --row:rgba(255,255,255,.62); --row-h:rgba(255,255,255,.95); --row-a:rgba(255,255,255,.32); --we:rgba(20,25,40,.04);
+  --input:rgba(255,255,255,.75); --input-f:#fff; --opt:#fff; --scheme:light;
+  --btn-bg:#15171c; --btn-fg:#ffffff;
+  --teal:#0e9483; --lime:#6f8f00; --green:#25904a; --orange:#cf7414; --red:#d23f32;
+  --shadow:0 10px 36px rgba(30,40,70,.10), inset 0 1px 0 var(--hi);
+}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;color:var(--text);font:14px/1.45 "Outfit",system-ui,"Segoe UI",sans-serif;
+  background:var(--bgfx),var(--bg);background-attachment:fixed;transition:background-color .3s}
+button,input,select{font:inherit;color:inherit}
+[hidden]{display:none!important}
+svg{flex:none}
+/* "liquid glass" */
+.glass{background:var(--glass-bg);border:1px solid var(--line);
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow)}
+
+/* ============ kirish */
+.auth{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.auth form{width:100%;max-width:400px;border-radius:32px;padding:36px 32px}
+.logo{width:46px;height:46px;border-radius:14px;background:#f2f3f5;color:#111;display:grid;place-items:center}
+.auth h1{font-size:30px;font-weight:600;letter-spacing:-.02em;margin:20px 0 4px}
+.auth p{color:var(--muted);margin:0 0 24px}
+.field{display:block;margin-bottom:14px}
+.field>span{display:block;font-size:12.5px;color:var(--muted);margin:0 0 6px 4px}
+.field input,.field select,.inp{width:100%;padding:11px 14px;border-radius:14px;border:1px solid var(--line);background:var(--input);outline:none;color-scheme:var(--scheme)}
+.field input:focus,.field select:focus,.inp:focus{border-color:var(--line2);background:var(--input-f)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 18px;border:0;border-radius:14px;background:var(--btn-bg);color:var(--btn-fg);font-weight:600;cursor:pointer;transition:transform .1s,opacity .15s;white-space:nowrap}
+.btn:hover{transform:translateY(-1px)} .btn:disabled{opacity:.55;cursor:default;transform:none}
+.btn.full{width:100%;margin-top:6px}
+.btn.ghost{background:var(--g2);color:var(--text);border:1px solid var(--line)}
+.btn.sm{padding:7px 12px;border-radius:11px;font-size:13px}
+.btn.danger{background:rgba(255,123,110,.14);color:var(--red);border:1px solid rgba(255,123,110,.25)}
+.ferr{display:none;margin-top:12px;padding:10px 14px;border-radius:12px;background:rgba(255,123,110,.13);color:var(--red);font-size:13.5px}
+.okmsg{display:none;margin-top:12px;padding:10px 14px;border-radius:12px;background:rgba(143,227,138,.12);color:var(--green);font-size:13.5px}
+
+/* ============ karkas */
+.shell{display:flex;gap:20px;min-height:100vh;padding:20px}
+.side{position:sticky;top:20px;z-index:30;height:calc(100vh - 40px);width:76px;flex:none;background:var(--side);border-radius:28px;
+  display:flex;flex-direction:column;align-items:center;padding:20px 0;gap:8px;box-shadow:0 20px 50px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.05)}
+.side .logo{margin-bottom:20px}
+.nav{width:46px;height:46px;border-radius:14px;border:0;background:transparent;color:rgba(255,255,255,.6);display:grid;place-items:center;cursor:pointer;position:relative;transition:background .15s,color .15s}
+.nav:hover{background:rgba(255,255,255,.07);color:#fff}
+.nav.active{background:rgba(255,255,255,.13);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.nav svg{width:21px;height:21px}
+.nav .tip{position:absolute;left:58px;white-space:nowrap;background:#000;padding:6px 11px;border-radius:9px;font-size:12.5px;opacity:0;pointer-events:none;transition:opacity .15s}
+.nav:hover .tip{opacity:1}
+.nav .badge-n{position:absolute;top:6px;right:5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--orange);color:#111;font-size:10.5px;font-weight:700;display:grid;place-items:center}
+.side .sp{flex:1}
+
+.frame{flex:1;min-width:0;border-radius:34px;padding:26px 30px 32px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.top h1{margin:0;font-size:32px;font-weight:500;letter-spacing:-.02em;margin-right:auto}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;background:var(--g2);border:1px solid var(--line);font-size:13.5px;white-space:nowrap}
+.search{min-width:220px}
+.search input{border:0;background:transparent;outline:none;width:100%}
+.search input::placeholder{color:var(--faint)}
+.avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#8f98ab,#4a5160);color:#fff;display:grid;place-items:center;font-weight:600;text-transform:uppercase;border:2px solid rgba(255,255,255,.2);flex:none}
+
+.banner{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:18px;margin-bottom:14px;font-size:13.5px;background:rgba(95,212,196,.08);border:1px solid rgba(95,212,196,.35)}
+.banner svg{color:var(--teal)}
+.banner.warn{background:rgba(255,179,94,.09);border-color:rgba(255,179,94,.35)} .banner.warn svg{color:var(--orange)}
+.banner a{color:var(--teal);cursor:pointer;text-decoration:underline;font-weight:600}
+
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.seg{display:inline-flex;padding:4px;border-radius:14px;background:var(--g1);border:1px solid var(--line)}
+.seg button{border:0;background:transparent;padding:7px 14px;border-radius:10px;cursor:pointer;color:var(--muted);font-weight:500}
+.seg button.on{background:var(--g3);color:var(--text);box-shadow:inset 0 1px 0 var(--hi)}
+.ibtn{width:36px;height:36px;border-radius:12px;border:1px solid var(--line);background:var(--g1);cursor:pointer;display:grid;place-items:center;color:var(--muted)}
+.ibtn:hover{background:var(--g2);color:var(--text)}
+.dinput{padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--g2);outline:none;color-scheme:var(--scheme);font-weight:500}
+.sel{padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--g2);outline:none;color-scheme:var(--scheme)}
+.sel option,.field select option{background:var(--opt);color:var(--text)}
+.link{border:0;background:transparent;color:var(--teal);font-weight:600;cursor:pointer;padding:7px 8px;border-radius:10px;display:inline-flex;align-items:center;gap:5px}
+.link:hover{background:rgba(95,212,196,.08)}
+.toolbar .sp{flex:1}
+.muted{color:var(--muted)}
+
+/* kartalar */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:14px}
+.card{border-radius:24px;background:var(--card-bg);border:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hi)}
+.tcard{padding:16px 18px;cursor:pointer;transition:background .15s}
+.tcard:hover{background:var(--card-bg-h)}
+.tcard .k{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.tcard .k b{color:var(--text);font-weight:600;font-size:13px;letter-spacing:.02em}
+.tcard .big{font-size:17px;font-weight:600;margin:6px 0 3px;display:flex;align-items:center;gap:7px}
+.ok{color:var(--teal)} .warn{color:var(--orange)} .bad{color:var(--red)}
+.tcard .s{font-size:12px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}
+.last{display:flex;align-items:center;gap:14px;padding:14px 18px;cursor:pointer}
+.last.flash{animation:flash 1.6s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 2px var(--teal),0 0 40px rgba(95,212,196,.3)}100%{box-shadow:inset 0 1px 0 var(--hi)}}
+.last .info{flex:1;min-width:0}
+.last .nm{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.last .s{font-size:12px;color:var(--muted);margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.last .t{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.last .ago{font-size:12px;color:var(--muted);text-align:right}
+
+.av{position:relative;width:36px;height:36px;flex:none}
+.av img,.av .ini{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover}
+.av.sq img,.av.sq .ini{border-radius:14px}
+.av.lg{width:56px;height:56px}
+.ini{display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;text-transform:uppercase}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.stat{padding:16px 18px}
+.stat .l{font-size:12.5px;color:var(--muted)}
+.stat .v{font-size:30px;font-weight:600;letter-spacing:-.02em;margin-top:2px;font-variant-numeric:tabular-nums}
+.stat .bar{height:2px;border-radius:2px;background:var(--line);margin-top:8px;overflow:hidden}
+.stat .bar b{display:block;height:100%;border-radius:2px;background:currentColor;transition:width .5s}
+
+/* jadval */
+.tablecard{padding:8px 10px 10px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 6px}
+th{text-align:left;font-size:12.5px;color:var(--muted);font-weight:400;padding:12px 14px 8px;white-space:nowrap;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;background:var(--row);white-space:nowrap;vertical-align:middle}
+td:first-child{border-radius:16px 0 0 16px} td:last-child{border-radius:0 16px 16px 0}
+tr.row{cursor:pointer} tr.row:hover td{background:var(--row-h)}
+tr.absent td{background:var(--row-a);color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums}
+td.strong{font-weight:600}
+td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
+.who{display:flex;align-items:center;gap:12px}
+.who b{display:block;font-weight:500}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;margin-right:4px;background:var(--g2);white-space:nowrap}
+.p-in{color:var(--green)} .p-out{color:var(--muted)} .p-late{color:var(--orange);background:rgba(255,179,94,.12)}
+.p-abs{color:var(--red);background:rgba(255,123,110,.12)} .p-rep{color:var(--faint)} .p-term{color:var(--teal);background:rgba(95,212,196,.10)}
+.p-unl{color:var(--orange);background:rgba(255,179,94,.10)}
+.eye{border:0;background:transparent;color:var(--orange);cursor:pointer;padding:6px;border-radius:8px}
+.eye:hover{background:var(--g2)}
+.empty td{text-align:center;color:var(--muted);padding:36px;border-radius:16px}
+
+.tabel th,.tabel td{padding:8px 5px;text-align:center;font-size:12px}
+.tabel td{border-radius:0!important}
+.tabel tr td:first-child{border-radius:14px 0 0 14px!important} .tabel tr td:last-child{border-radius:0 14px 14px 0!important}
+.tabel th:first-child,.tabel td:first-child{text-align:left;padding-left:12px;min-width:210px}
+.tabel th.we,.tabel td.we{background:var(--we)}
+.tabel th.td{color:var(--teal)} .tabel td.td{box-shadow:inset 0 0 0 1px var(--teal)}
+.tabel td.c-late{color:var(--orange);font-weight:600}
+.tabel td.c-none{color:var(--faint)}
+.tabel td.tot{font-weight:600;color:var(--teal)}
+.tabel th small{display:block;font-size:10px;color:var(--faint)}
+
+/* sozlamalar */
+.sgrid{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;align-items:start}
+.snav{padding:8px;display:flex;flex-direction:column;gap:4px}
+.snav button{display:flex;align-items:center;gap:10px;padding:11px 14px;border:0;border-radius:14px;background:transparent;color:var(--muted);cursor:pointer;text-align:left;font-weight:500}
+.snav button:hover{background:var(--g1);color:var(--text)}
+.snav button.on{background:var(--g3);color:var(--text);box-shadow:inset 0 1px 0 var(--hi)}
+.snav .n{margin-left:auto;background:var(--orange);color:#111;border-radius:9px;padding:0 6px;font-size:11px;font-weight:700}
+.spane{padding:22px 22px 18px}
+.spane h2{margin:0 0 4px;font-size:21px;font-weight:500}
+.spane .desc{color:var(--muted);margin:0 0 18px}
+.phead{display:flex;align-items:flex-start;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+.phead>div{margin-right:auto}
+.tlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.titem{padding:18px;border-radius:20px;background:var(--g1);border:1px solid var(--line)}
+.titem h3{margin:0;font-size:19px;font-weight:600;display:flex;align-items:center;gap:8px}
+.titem .meta{color:var(--muted);font-size:12.5px;margin:6px 0 10px;line-height:1.6}
+.titem .acts{display:flex;gap:8px}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.check{display:inline-flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer;font-size:13px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+.ulist{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:8px}
+.ulist li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:16px;background:var(--g1)}
+.ulist li b{flex:1;font-weight:500}
+.sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:22px 4px 10px}
+/* telegram */
+.tggrid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:26px;align-items:start}
+.steps{margin:0 0 12px;padding-left:22px;color:var(--muted);font-size:13px;line-height:1.7}
+.steps b{color:var(--text);font-weight:600}
+.steps code,.tgprev code{background:var(--g2);padding:1px 6px;border-radius:6px;color:var(--text);font-size:12px}
+.tokrow{display:flex;gap:10px;align-items:flex-end}
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.switch input{display:none}
+.switch span{width:46px;height:28px;border-radius:14px;background:var(--g3);border:1px solid var(--line2);position:relative;transition:.2s}
+.switch span:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:.2s}
+.switch input:checked+span{background:var(--green);border-color:transparent}
+.switch input:checked+span:after{left:21px}
+.switch b{font-weight:600;font-size:13px;min-width:46px}
+.tgprev{border-radius:18px;overflow:hidden;background:var(--g1);border:1px solid var(--line);max-width:300px}
+.tgprev .ph{aspect-ratio:4/3;background:var(--g2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--faint)}
+.tgprev .ph small{font-size:11px}
+.tgprev .tx{padding:12px 14px 10px;font-size:13.5px;line-height:1.55;position:relative}
+.tgprev .tm{position:absolute;right:12px;bottom:8px;font-size:11px;color:var(--faint)}
+.ulist li .tp{font-size:11.5px;color:var(--muted)}
+@media (max-width:1100px){ .tggrid{grid-template-columns:1fr} }
+/* savdo (BILLZ) */
+.sg2{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
+.sg2>.col{display:flex;flex-direction:column;gap:14px}
+.pad{padding:18px 20px}
+.ct{margin:0 0 12px;font-size:13px;font-weight:500;color:var(--muted);display:flex;align-items:center;gap:8px}
+.ct b{margin-left:auto;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.chart{display:flex;align-items:flex-end;gap:4px;height:210px;padding-top:8px}
+.chart .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0;cursor:default}
+.chart .b i{display:block;width:100%;max-width:26px;border-radius:7px 7px 3px 3px;background:var(--teal);opacity:.85;min-height:2px;transition:height .4s}
+.chart .b:hover i{opacity:1}
+.chart .b small{font-size:10px;color:var(--faint);margin-top:6px;height:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.hl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.hl li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 10px;font-size:13.5px}
+.hl li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hl li b{font-weight:600;font-variant-numeric:tabular-nums}
+.hl .tr{grid-column:1/-1;height:6px;border-radius:3px;background:var(--g2);overflow:hidden}
+.hl .tr i{display:block;height:100%;border-radius:3px;background:var(--teal)}
+.share{display:flex;align-items:center;gap:8px;min-width:120px}
+.share .tr{flex:1;height:6px;border-radius:3px;background:var(--g2);overflow:hidden}
+.share .tr i{display:block;height:100%;background:var(--teal);border-radius:3px}
+.share small{display:inline;width:38px;text-align:right}
+.stat .v.sm{font-size:24px}
+.stat .v small{display:inline;font-size:13px;color:var(--muted);font-weight:500;margin-left:4px}
+.secttl{font-size:16px;font-weight:500;margin:18px 4px 10px}
+@media (max-width:1100px){ .sg2{grid-template-columns:1fr} }
+
+/* modallar */
+.modal{position:fixed;inset:0;background:rgba(8,10,14,.42);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.open{display:flex}
+.mbox{width:100%;max-width:760px;max-height:90vh;overflow:auto;border-radius:28px;padding:24px;background:var(--modal-bg);border:1px solid var(--line2);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:0 30px 80px rgba(0,0,0,.35),inset 0 1px 0 var(--hi)}
+.mbox.sm{max-width:460px}
+.mhead{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.mhead h3{margin:0;font-size:20px;font-weight:500}
+.mhead .x{margin-left:auto;width:36px;height:36px;border-radius:12px;border:1px solid var(--line);background:var(--g1);cursor:pointer;font-size:17px}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:10px}
+.shot{border-radius:16px;overflow:hidden;background:var(--g1);border:1px solid var(--line)}
+.shot img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;background:var(--g2)}
+.shot div{padding:8px 10px;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap}
+
+@media (max-width:1100px){ .stats{grid-template-columns:repeat(2,1fr)} .sgrid{grid-template-columns:1fr} .snav{flex-direction:row;overflow-x:auto} }
+@media (max-width:760px){
+  .shell{flex-direction:column;padding:10px;gap:10px}
+  .side{position:sticky;top:10px;height:auto;width:auto;flex-direction:row;padding:8px 12px;border-radius:22px;gap:4px;overflow-x:auto}
+  .side .logo{margin:0 6px 0 0;width:38px;height:38px}
+  .nav .tip{display:none}
+  .frame{padding:18px 14px;border-radius:26px}
+  .top h1{font-size:26px;width:100%}
+  .search{min-width:0;flex:1}
+  .row2,.row3{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= KIRISH ================= -->
+<div class="auth" id="auth" hidden>
+  <form class="glass" id="authForm" autocomplete="on">
+    <div class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg></div>
+    <h1 id="authTitle">Davomat</h1>
+    <p id="authSub">Davom etish uchun tizimga kiring</p>
+    <label class="field"><span>Login</span><input id="aUser" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="Loginingizni kiriting"></label>
+    <label class="field"><span>Parol</span><input id="aPass" name="password" type="password" autocomplete="current-password" placeholder="Parolingiz"></label>
+    <label class="field" id="aPass2Wrap" hidden><span>Parolni takrorlang</span><input id="aPass2" type="password" autocomplete="new-password" placeholder="Parolni qayta kiriting"></label>
+    <button class="btn full" id="aBtn" type="submit">Kirish</button>
+    <div class="ferr" id="aErr"></div>
+  </form>
+</div>
+
+<!-- ================= ILOVA ================= -->
+<div class="shell" id="app" hidden>
+  <nav class="side">
+    <div class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg></div>
+    <button class="nav active" data-nav="day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8 16v-4M12 16V8M16 16v-6"/></svg><span class="tip">Kunlik davomat</span></button>
+    <button class="nav" data-nav="month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16.5" rx="4"/><path d="M3 10h18M8 2.5v4M16 2.5v4M8 14h2M14 14h2M8 17.5h2"/></svg><span class="tip">Oylik tabel</span></button>
+    <button class="nav" data-nav="sales"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14l-1.3 11.1a2 2 0 0 1-2 1.9H8.3a2 2 0 0 1-2-1.9z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg><span class="tip">Savdo (BILLZ)</span></button>
+    <button class="nav" data-nav="excel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/></svg><span class="tip">Hisobot (Excel)</span></button>
+    <button class="nav" data-nav="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><i class="badge-n" id="navUnl" hidden></i><span class="tip">Sozlamalar</span></button>
+    <span class="sp"></span>
+    <button class="nav" id="navTheme"><svg id="icSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg id="icMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><span class="tip" id="themeTip">Yorug' rejim</span></button>
+    <button class="nav" id="navLogout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4M6 12h10"/></svg><span class="tip">Chiqish</span></button>
+  </nav>
+
+  <div class="frame glass">
+    <div class="top">
+      <h1 id="pageTitle">Davomat (Face ID)</h1>
+      <label class="chip search" id="searchChip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="Qidirish..."></label>
+      <span class="chip" id="todayTxt"></span>
+      <div class="avatar" id="meAv"></div>
+    </div>
+
+    <!-- ===== DASHBOARD ===== -->
+    <div id="viewDash">
+      <div class="banner warn" id="unlBanner" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>Terminallarda <b id="unlN">0</b> ta ID hech bir xodimga bog'lanmagan — <a id="unlLink">Moslash</a> bo'limida bog'lang.</span></div>
+
+      <div class="toolbar">
+        <div class="seg"><button id="mDay" class="on">Kun</button><button id="mMonth">Oy (tabel)</button></div>
+        <button class="ibtn" id="prev" title="Oldingi">←</button>
+        <input class="dinput" type="date" id="date">
+        <input class="dinput" type="month" id="month" hidden>
+        <button class="ibtn" id="next" title="Keyingi">→</button>
+        <button class="link" id="goToday">Bugun</button>
+        <select class="sel" id="tfilter" title="Terminal bo'yicha"><option value="">Hamma terminallar</option></select>
+        <span class="sp"></span>
+        <span class="muted" id="updTxt"></span>
+        <button class="link" id="refresh">↻ Yangilash</button>
+        <button class="link" id="btnExcel">↓ Excel</button>
+      </div>
+
+      <div class="cards" id="cards">
+        <div class="card last" id="lastCard">
+          <div class="av lg sq" id="lastPh"></div>
+          <div class="info"><div class="muted" style="font-size:12px">Oxirgi o'tish</div><div class="nm" id="lastName">Hali hech kim o'tmadi</div><div class="s" id="lastSub"></div></div>
+          <div><div class="t" id="lastTime"></div><div class="ago" id="lastAgo"></div></div>
+        </div>
+      </div>
+
+      <div class="stats" id="dayStats">
+        <div class="card stat" style="color:var(--teal)"><div class="l">Keldi</div><div class="v" id="sCame">0 / 0</div><div class="bar"><b id="bCame"></b></div></div>
+        <div class="card stat" style="color:var(--orange)"><div class="l" id="lateLbl">Kechikdi</div><div class="v" id="sLate">0</div><div class="bar"><b id="bLate"></b></div></div>
+        <div class="card stat" style="color:var(--red)"><div class="l">Kelmadi</div><div class="v" id="sAbsent">0</div><div class="bar"><b id="bAbsent"></b></div></div>
+        <div class="card stat" style="color:var(--green)"><div class="l">Hozir ishda</div><div class="v" id="sInside">0</div><div class="bar"><b id="bInside"></b></div></div>
+      </div>
+
+      <div class="card tablecard"><div class="tablewrap" id="tableWrap"></div></div>
+    </div>
+
+    <!-- ===== SAVDO (BILLZ) ===== -->
+    <div id="viewSales" hidden>
+      <div class="banner warn" id="bzNot" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>BILLZ hali ulanmagan. <a id="bzGo">Sozlamalar → BILLZ</a> bo'limida integratsiya kalitini kiriting.</span></div>
+      <div class="toolbar">
+        <div class="seg" id="svTabs"><button data-sv="sales" class="on">Savdo</button><button data-sv="stock">Ombor</button><button data-sv="debts">Qarzlar</button></div>
+        <span id="perBox" style="display:contents">
+          <div class="seg" id="perSeg"><button data-per="today" class="on">Bugun</button><button data-per="yday">Kecha</button><button data-per="week">7 kun</button><button data-per="month">Shu oy</button></div>
+          <input class="dinput" type="date" id="sFrom"><span class="muted">—</span><input class="dinput" type="date" id="sTo">
+        </span>
+        <span class="sp"></span>
+        <span class="muted" id="sUpd"></span>
+        <button class="link" id="sRefresh">↻ Yangilash</button>
+      </div>
+      <div class="banner warn" id="sErr" hidden></div>
+      <div id="salesBody"></div>
+    </div>
+
+    <!-- ===== SOZLAMALAR ===== -->
+    <div id="viewSettings" hidden>
+      <div class="sgrid">
+        <div class="card snav">
+          <button data-st="terminals" class="on">📟 Terminallar</button>
+          <button data-st="staff">👥 Xodimlar</button>
+          <button data-st="match">🔗 Moslash <span class="n" id="stUnl" hidden></span></button>
+          <button data-st="telegram">✈️ Telegram bot <span class="n" id="stTg" hidden>!</span></button>
+          <button data-st="billz">🛒 BILLZ</button>
+          <button data-st="accounts">🔑 Foydalanuvchilar</button>
+          <button data-st="general">⏰ Ish vaqti</button>
+        </div>
+        <div class="card spane">
+          <!-- terminallar -->
+          <div data-pane="terminals">
+            <div class="phead"><div><h2>Terminallar</h2><p class="desc">Face ID terminallarini qo'shing va nom bering (masalan SKLAD, OFIS). Dashboardda har bir o'tish qaysi terminaldan bo'lgani shu nom bilan chiqadi.</p></div>
+              <button class="btn" id="addTerm">+ Terminal qo'shish</button></div>
+            <div class="tlist" id="termList"></div>
+          </div>
+          <!-- xodimlar -->
+          <div data-pane="staff" hidden>
+            <div class="phead"><div><h2>Xodimlar</h2><p class="desc">Xodimni qo'shing va har bir terminaldagi ID siga bog'lang. Bir xodim bir nechta terminalda bo'lishi mumkin — hammasi bitta odam bo'lib hisoblanadi.</p></div>
+              <button class="btn" id="addStaff">+ Xodim qo'shish</button></div>
+            <div class="tablewrap"><table><thead><tr><th>Xodim</th><th>Tabel raqami</th><th>Bo'lim</th><th>Terminallar</th><th></th></tr></thead><tbody id="staffBody"></tbody></table></div>
+          </div>
+          <!-- moslash -->
+          <div data-pane="match" hidden>
+            <div class="phead"><div><h2>Moslash</h2><p class="desc">Terminaldan kelgan har bir ID ni xodimga bog'lang. Bog'lanmagan ID lar dashboardda alohida (terminal nomi bilan) ko'rinadi.</p></div>
+              <button class="btn ghost" id="autoLink">⚡ Ism bo'yicha avtomatik bog'lash</button></div>
+            <div style="display:flex;gap:14px;align-items:center;margin:4px 0 6px;flex-wrap:wrap">
+              <label class="check"><input type="checkbox" id="onlyUnl"> Faqat bog'lanmaganlar</label>
+              <span class="muted" id="autoMsg"></span>
+            </div>
+            <div class="tablewrap"><table><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th></tr></thead><tbody id="matchBody"></tbody></table></div>
+          </div>
+          <!-- foydalanuvchilar -->
+          <div data-pane="accounts" hidden>
+            <h2>Dashboard foydalanuvchilari</h2><p class="desc">Dashboardga kim login/parol bilan kira olishi.</p>
+            <ul class="ulist" id="uList"></ul>
+            <form id="uAdd">
+              <div class="sec">Yangi foydalanuvchi</div>
+              <div class="row2">
+                <label class="field"><span>Login</span><input id="nuUser" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Login"></label>
+                <label class="field"><span>Parol</span><input id="nuPass" type="password" autocomplete="new-password" placeholder="Kamida 6 belgi"></label>
+              </div>
+              <button class="btn" type="submit">Qo'shish</button>
+              <div class="ferr" id="uErr"></div><div class="okmsg" id="uOk"></div>
+            </form>
+            <form id="uPw">
+              <div class="sec">Mening parolimni almashtirish</div>
+              <div class="row2">
+                <label class="field"><span>Joriy parol</span><input id="pwOld" type="password" autocomplete="current-password"></label>
+                <label class="field"><span>Yangi parol</span><input id="pwNew" type="password" autocomplete="new-password" placeholder="Kamida 6 belgi"></label>
+              </div>
+              <button class="btn" type="submit">Almashtirish</button>
+              <div class="ferr" id="pwErr"></div><div class="okmsg" id="pwOk"></div>
+            </form>
+          </div>
+          <!-- telegram -->
+          <div data-pane="telegram" hidden>
+            <div class="phead"><div><h2>Telegram bot</h2><p class="desc">Kim terminaldan o'tsa, Telegram'ga terminal olgan rasm, ism, ID, kirdi/chiqdi, sana, soat va terminal nomi yuboriladi.</p></div>
+              <label class="switch" title="Yoqish / o'chirish"><input type="checkbox" id="tgOn"><span></span><b id="tgOnTxt">O'chiq</b></label></div>
+            <div class="tggrid">
+              <div>
+                <div class="sec" style="margin-top:4px">1. Bot tokeni</div>
+                <ol class="steps">
+                  <li>Telegram'da <b>@BotFather</b> ni oching → <code>/newbot</code> → botga nom bering.</li>
+                  <li>BotFather bergan tokenni nusxalab, pastga qo'ying va <b>Saqlash</b> ni bosing.</li>
+                </ol>
+                <div class="tokrow">
+                  <label class="field" style="flex:1;margin:0"><span id="tgTokLbl">Bot tokeni</span><input id="tgTok" type="password" autocomplete="off" spellcheck="false" placeholder="123456789:AAH..."></label>
+                  <button class="btn" id="tgTokSave" type="button">Saqlash</button>
+                </div>
+                <div class="muted" id="tgBot" style="margin-top:8px"></div>
+
+                <div class="sec">2. Qayerga yuborilsin</div>
+                <ol class="steps">
+                  <li>Botingizga Telegram'da <code>/start</code> yozing — yoki botni guruhga qo'shib, guruhda biror xabar yozing.</li>
+                  <li><b>Chatlarni topish</b> ni bosing va kerakli chatni qo'shing.</li>
+                </ol>
+                <ul class="ulist" id="tgChats"></ul>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                  <button class="btn ghost" id="tgFind" type="button">🔍 Chatlarni topish</button>
+                  <input class="dinput" id="tgManual" placeholder="yoki Chat ID: -100..." style="width:190px">
+                  <button class="link" id="tgManualAdd" type="button">+ Qo'shish</button>
+                </div>
+                <ul class="ulist" id="tgFound" style="margin-top:10px"></ul>
+
+                <div class="sec">3. Sozlamalar</div>
+                <div class="muted" style="font-size:13px;margin:0 4px 8px">Qaysi terminallardan yuborilsin:</div>
+                <div class="chips" id="tgTerms" style="gap:14px;margin:0 4px 12px"></div>
+                <label class="check" style="margin:0 4px"><input type="checkbox" id="tgSkip"> Takroriy o'tishlarni yubormaslik (bir daqiqa ichida qayta o'tsa)</label>
+
+                <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+                  <button class="btn" id="tgSave" type="button">Saqlash</button>
+                  <button class="btn ghost" id="tgTest" type="button">✈️ Sinov xabari yuborish</button>
+                </div>
+                <div class="ferr" id="tgErr"></div><div class="okmsg" id="tgOk"></div>
+                <div class="muted" id="tgStat" style="margin-top:12px;font-size:12.5px;line-height:1.6"></div>
+              </div>
+              <div>
+                <div class="sec" style="margin-top:4px">Xabar ko'rinishi</div>
+                <div class="tgprev">
+                  <div class="ph"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><small>terminal olgan rasm</small></div>
+                  <div class="tx">🟢 <b>Hodim kirdi</b><br><br>👤 Hodim: <b>Ayubxon</b><br>🆔 ID raqami: 1<br>📍 Holati: Kirdi<br>📅 Sanasi: 24.11.2026<br>🕒 Soati: 15:50<br>🏢 Terminal: OFIS<span class="tm">15:50</span></div>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:10px 4px 0">Chiqqanda: 🔴 <b>Hodim chiqdi</b>. Ish vaqtidan keyin kelsa: ⏰ Kechikdi: N daqiqa.</p>
+              </div>
+            </div>
+          </div>
+          <!-- billz -->
+          <div data-pane="billz" hidden>
+            <h2>BILLZ ulanishi</h2><p class="desc">Savdo, sotuvchilar bo'yicha savdo, ombor qoldiqlari va mijozlar qarzi BILLZ'dan olinib dashboardda ko'rsatiladi.</p>
+            <div id="bzOn" hidden>
+              <ul class="ulist"><li><span style="font-size:18px">🛒</span><b><span class="ok" style="font-weight:600">✓ BILLZ ulangan</span> <span class="tp" id="bzInfo"></span></b>
+                <button class="btn danger sm" id="bzOff" type="button">Uzish</button></li></ul>
+            </div>
+            <form id="bzForm" style="max-width:560px" autocomplete="off">
+              <ol class="steps">
+                <li><b>rafiq.billz.io</b> ga kiring → <b>Настройки</b> (Sozlamalar) bo'limida <b>API / Интеграции</b> yoki <b>Секретный ключ</b> ni toping.</li>
+                <li>Maxfiy kalitni (secret key) nusxalab, pastga qo'ying va <b>Ulash</b> ni bosing.</li>
+                <li>Kalit topilmasa — BILLZ qo'llab-quvvatlash xizmatidan "API secret key" so'rang.</li>
+              </ol>
+              <div class="tokrow">
+                <label class="field" style="flex:1;margin:0"><span id="bzLbl">BILLZ maxfiy kaliti</span><input id="bzKey" type="password" autocomplete="off" spellcheck="false" placeholder="Secret key"></label>
+                <button class="btn" id="bzBtn" type="submit">Ulash</button>
+              </div>
+              <div class="ferr" id="bzErr"></div><div class="okmsg" id="bzOk"></div>
+            </form>
+          </div>
+          <!-- umumiy -->
+          <div data-pane="general" hidden>
+            <h2>Ish vaqti</h2><p class="desc">Kechikishni hisoblash va takror o'tishlarni aniqlash.</p>
+            <form id="genForm" style="max-width:460px">
+              <label class="field"><span>Ish boshlanish vaqti (bundan keyin kelgan — kechikkan)</span><input type="time" id="gWs"></label>
+              <label class="field"><span>Takror o'tish oralig'i, soniya (shu vaqt ichida qayta o'tish hisobga olinmaydi)</span><input type="number" id="gGap" min="0" max="3600"></label>
+              <button class="btn" type="submit">Saqlash</button>
+              <div class="ferr" id="gErr"></div><div class="okmsg" id="gOk"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- xodim o'tishlari -->
+<div class="modal" id="mPerson"><div class="mbox">
+  <div class="mhead"><div class="av lg sq" id="pAv"></div><div><h3 id="pName"></h3><div class="muted" id="pSub"></div></div><button class="x" data-close>×</button></div>
+  <div class="shots" id="pGrid"></div>
+</div></div>
+
+<!-- Excel -->
+<div class="modal" id="mReport"><div class="mbox sm">
+  <div class="mhead"><h3>Excel hisobot</h3><button class="x" data-close>×</button></div>
+  <p class="muted" style="margin:0 0 16px">Keldi/ketdi, qaysi terminal, ishlagan vaqt va kechikish CSV faylda yuklanadi (Excel'da ochiladi).</p>
+  <div class="row2">
+    <label class="field"><span>Boshlanish</span><input type="date" id="from"></label>
+    <label class="field"><span>Tugash</span><input type="date" id="to"></label>
+  </div>
+  <label class="field"><span>Terminal</span><select id="rTerm"><option value="">Hamma terminallar</option></select></label>
+  <button class="btn full" id="exportBtn">Yuklab olish</button>
+</div></div>
+
+<!-- terminal formasi -->
+<div class="modal" id="mTerm"><form class="mbox sm" id="termForm" autocomplete="off">
+  <div class="mhead"><h3 id="tfTitle">Terminal qo'shish</h3><button class="x" type="button" data-close>×</button></div>
+  <label class="field"><span>Terminal nomi</span><input id="tfName" placeholder="Masalan: SKLAD yoki OFIS" maxlength="40"></label>
+  <div class="row3">
+    <label class="field"><span>IP manzil</span><input id="tfHost" placeholder="192.168.1.20" autocapitalize="off" spellcheck="false"></label>
+    <label class="field" style="grid-column:span 2"><span>Port</span><input id="tfPort" type="number" value="80"></label>
+  </div>
+  <div class="row2">
+    <label class="field"><span>Terminal logini</span><input id="tfUser" placeholder="Terminal logini" autocapitalize="off" spellcheck="false"></label>
+    <label class="field"><span>Terminal paroli</span><input id="tfPass" type="password" placeholder="Terminal paroli" autocomplete="new-password"></label>
+  </div>
+  <p class="muted" style="margin:0 0 8px;font-size:12.5px">Saqlashdan oldin terminalga ulanib tekshiriladi. Terminal shu kompyuter bilan bir tarmoqda bo'lishi kerak.</p>
+  <button class="btn full" type="submit" id="tfBtn">Ulanib, saqlash</button>
+  <div class="ferr" id="tfErr"></div>
+</form></div>
+
+<!-- xodim formasi -->
+<div class="modal" id="mStaff"><form class="mbox sm" id="staffForm" autocomplete="off">
+  <div class="mhead"><h3 id="sfTitle">Xodim qo'shish</h3><button class="x" type="button" data-close>×</button></div>
+  <label class="field"><span>Ism familiya</span><input id="sfName" placeholder="Masalan: Rahmonov Asadbek" maxlength="80"></label>
+  <div class="row2">
+    <label class="field"><span>Tabel raqami (ixtiyoriy)</span><input id="sfCode" placeholder="W001" maxlength="30"></label>
+    <label class="field"><span>Bo'lim (ixtiyoriy)</span><input id="sfDept" placeholder="Moliya" maxlength="60" list="deptList"></label>
+  </div>
+  <datalist id="deptList"></datalist>
+  <div class="sec" style="margin-top:8px">Terminallardagi ID si</div>
+  <div id="sfLinks"></div>
+  <button class="btn full" type="submit">Saqlash</button>
+  <div class="ferr" id="sfErr"></div>
+</form></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const hm = t => t ? t.slice(11,16) : "";
+const hms = t => t ? t.slice(11,19) : "";
+const hmm = m => `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}`;
+const DAYS = ["yakshanba","dushanba","seshanba","chorshanba","payshanba","juma","shanba"];
+const DSHORT = ["Ya","Du","Se","Ch","Pa","Ju","Sh"];
+const MONTHS = ["yanvar","fevral","mart","aprel","may","iyun","iyul","avgust","sentabr","oktabr","noyabr","dekabr"];
+const COLORS = ["#1f8a7a","#1e6f8f","#3554b5","#8a6a12","#a23a78","#b03a3a","#5b4bb0","#2f7d3a"];
+const color = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; };
+const initials = n => { const w = String(n || "?").trim().split(/\s+/); return ((w[0]||"?")[0] + (w[1] ? w[1][0] : "")).toUpperCase(); };
+// kichik rasm: harfli doira, ustida rasm (bo'lmasa harflar qoladi)
+const av = (key, name, src) => `<span class="ini" style="background:${color(key)}">${esc(initials(name))}</span><img alt="" src="${src || "/face/" + encodeURIComponent(key)}" onerror="this.remove()">`;
+const ago = (t, now) => { const s = Math.max(0, Math.round((new Date(now) - new Date(t)) / 1000));
+  return s < 60 ? `${s} soniya oldin` : s < 3600 ? `${Math.floor(s/60)} daq oldin` : s < 86400 ? `${Math.floor(s/3600)} soat oldin` : `${Math.floor(s/86400)} kun oldin`; };
+const KIND = {in:["Keldi","p-in"], out:["Ketdi","p-out"], repeat:["Takror","p-rep"]};
+const kpill = k => { const [t,c] = KIND[k] || ["—","p-rep"]; return `<span class="pill ${c}">${t}</span>`; };
+const tpill = n => n ? `<span class="pill p-term">${esc(n)}</span>` : "";
+function showErr(id, msg){ const e = $(id); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
+function showOk(id, msg){ const e = $(id); e.textContent = msg; e.style.display = "block"; setTimeout(() => e.style.display = "none", 3500); }
+const uzDate = d => { const x = new Date(d + "T12:00:00"); return `${DAYS[x.getDay()]}, ${x.getDate()}-${MONTHS[x.getMonth()]} ${x.getFullYear()}`; };
+const addDays = (d, n) => { const x = new Date(d + "T12:00:00"); x.setDate(x.getDate() + n); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
+const addMonths = (m, n) => { let [y, mo] = m.split("-").map(Number); mo += n; while (mo > 12){ mo -= 12; y++; } while (mo < 1){ mo += 12; y--; } return `${y}-${String(mo).padStart(2,"0")}`; };
+
+/* ---------- API */
+async function api(url, opts={}){
+  const r = await fetch(url, {cache:"no-store", ...opts});
+  if (r.status === 401 && !url.startsWith("/api/auth")){ showAuth(false); throw new Error("auth"); }
+  return r;
+}
+async function j(url){ const r = await api(url); if (!r.ok) throw new Error(r.status); return r.json(); }
+async function post(url, body){
+  const r = await api(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body||{})});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ("Xato " + r.status));
+  return d;
+}
+
+/* ---------- kirish */
+let setupMode = false, me = null, timers = [];
+const stopTimers = () => { timers.forEach(clearInterval); timers = []; };
+function showAuth(setup){
+  stopTimers();
+  $$(".modal.open").forEach(m => m.classList.remove("open"));
+  setupMode = !!setup;
+  $("app").hidden = true; $("auth").hidden = false;
+  $("authTitle").textContent = setupMode ? "Xush kelibsiz" : "Davomat";
+  $("authSub").textContent = setupMode ? "Dashboard uchun birinchi administrator login va parolini yarating" : "Davom etish uchun tizimga kiring";
+  $("aPass2Wrap").hidden = !setupMode;
+  $("aPass").autocomplete = setupMode ? "new-password" : "current-password";
+  $("aBtn").textContent = setupMode ? "Yaratish va kirish" : "Kirish";
+  $("aUser").value = $("aPass").value = $("aPass2").value = "";
+  showErr("aErr", ""); setTimeout(() => $("aUser").focus(), 50);
+}
+$("authForm").onsubmit = async ev => {
+  ev.preventDefault();
+  const username = $("aUser").value.trim(), password = $("aPass").value;
+  if (!username || !password) return showErr("aErr", "Login va parolni kiriting");
+  if (setupMode && password !== $("aPass2").value) return showErr("aErr", "Parollar bir xil emas");
+  $("aBtn").disabled = true; showErr("aErr", "");
+  try{ const d = await post(setupMode ? "/api/auth/setup" : "/api/auth/login", {username, password}); me = d.user; $("aPass").value = $("aPass2").value = ""; startApp(); }
+  catch(e){ showErr("aErr", e.message); }
+  finally{ $("aBtn").disabled = false; }
+};
+/* ---------- yorug' / qorong'i rejim */
+function paintThemeBtn(){
+  const light = document.documentElement.dataset.theme === "light";
+  $("icSun").style.display = light ? "none" : ""; $("icMoon").style.display = light ? "" : "none";
+  $("themeTip").textContent = light ? "Qorong'i rejim" : "Yorug' rejim";
+}
+$("navTheme").onclick = () => {
+  const t = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = t;
+  try{ localStorage.setItem("davomat-theme", t); }catch(e){}
+  paintThemeBtn();
+};
+paintThemeBtn();
+
+$("navLogout").onclick = async () => { try{ await post("/api/auth/logout"); }catch(e){} me = null; showAuth(false); };
+
+/* ---------- holat */
+let S = null, today = null, view = "dash", mode = "day", viewDate = null, viewMonth = null, data = null, maxId = 0, lastEv = null, tid = "";
+
+function setNav(n){ $$(".side .nav[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === n)); }
+$$(".side .nav[data-nav]").forEach(b => b.onclick = () => {
+  const n = b.dataset.nav;
+  if (n === "excel") return openExcel();
+  if (n === "settings") return showSettings();
+  if (n === "sales") return showSales();
+  showDash(n);
+});
+function showDash(m){
+  view = "dash"; $("viewDash").hidden = false; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("searchChip").hidden = false;
+  $("pageTitle").textContent = "Davomat (Face ID)";
+  if (m) setMode(m); else setNav(mode);
+}
+function showSettings(tab){
+  view = "settings"; $("viewDash").hidden = true; $("viewSettings").hidden = false; $("viewSales").hidden = true; $("searchChip").hidden = true;
+  $("pageTitle").textContent = "Sozlamalar"; setNav("settings");
+  openTab(tab || curTab);
+}
+
+async function pollState(){
+  try{
+    const s = S = await j("/api/state");
+    $("lateLbl").textContent = `Kechikdi (${s.work_start} dan keyin)`;
+    renderTermCards();
+    const u = s.unlinked;
+    $("unlBanner").hidden = !u; $("unlN").textContent = u;
+    $("navUnl").hidden = !u; $("navUnl").textContent = u; $("stUnl").hidden = !u; $("stUnl").textContent = u;
+    const opts = `<option value="">Hamma terminallar</option>` + s.terminals.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+    for (const id of ["tfilter", "rTerm"]){ const el = $(id), v = el.value; if (el.dataset.sig !== opts){ el.innerHTML = opts; el.dataset.sig = opts; el.value = v; } }
+    if (today && s.today !== today && viewDate === today){ viewDate = s.today; $("date").value = viewDate; }
+    today = s.today; $("todayTxt").textContent = uzDate(today);
+    if (lastEv) $("lastAgo").textContent = ago(lastEv.time, s.now);
+  }catch(e){}
+}
+function termStatus(t){
+  if (t.connected) return ["ok", `Ulangan · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
+  if (t.need_login) return ["bad", "Login/parol kerak"];
+  return ["warn", "Ulanmagan"];
+}
+function renderTermCards(){
+  const box = $("cards");
+  box.querySelectorAll(".tcard").forEach(e => e.remove());
+  const html = S.terminals.map(t => {
+    const [cls, txt] = termStatus(t);
+    return `<div class="card tcard" data-tid="${t.id}" title="${esc(t.error || "")}">
+      <div class="k"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2.5" width="12" height="19" rx="2"/><circle cx="12" cy="9" r="2.5"/></svg><b>${esc(t.name)}</b>· ${esc(t.host)}${t.model ? " · " + esc(t.model) : ""}</div>
+      <div class="big ${cls}"><span class="dot"></span>${esc(txt)}</div>
+      <div class="s">o'tishlar: ${t.events_total}${t.last_event ? " · oxirgisi " + t.last_event.slice(5,10) + " " + hm(t.last_event) + " (" + ago(t.last_event, S.now) + ")" : ""}</div></div>`;
+  }).join("") || `<div class="card tcard" data-tid=""><div class="k">Terminal</div><div class="big warn">Hali terminal qo'shilmagan</div><div class="s">Sozlamalar → Terminallar bo'limida qo'shing</div></div>`;
+  box.insertAdjacentHTML("afterbegin", html);
+  box.querySelectorAll(".tcard").forEach(c => c.onclick = () => showSettings("terminals"));
+}
+
+/* ---------- oxirgi o'tish */
+function showLast(e, flash){
+  lastEv = e;
+  $("lastPh").innerHTML = av(e.key, e.name, `/photo/${e.id}`);
+  $("lastName").textContent = e.name || "Nomsiz";
+  $("lastSub").innerHTML = `${kpill(e.kind)}${tpill(e.terminal)}<span>${esc(e.code)}</span>`;
+  $("lastTime").textContent = hms(e.time);
+  $("lastAgo").textContent = S ? ago(e.time, S.now) : "";
+  if (flash){ const c = $("lastCard"); c.classList.remove("flash"); void c.offsetWidth; c.classList.add("flash"); }
+}
+$("lastCard").onclick = () => { if (lastEv) openPerson(lastEv.key, lastEv.name, lastEv.time.slice(0,10), true); };
+async function initFeed(){ const d = await j("/api/feed?after=0"); maxId = d.max_id; if (d.events[0]) showLast(d.events[0], false); }
+async function pollFeed(){
+  try{
+    const d = await j(`/api/feed?after=${maxId}`);
+    if (d.events.length){
+      maxId = d.max_id; showLast(d.events[d.events.length - 1], true);
+      if (view === "dash" && ((mode === "day" && viewDate === today) || (mode === "month" && viewMonth === today.slice(0,7)))) load();
+    }
+  }catch(e){}
+}
+
+/* ---------- kunlik jadval */
+const eyeBtn = `<button class="eye" title="O'tishlar rasmlari"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>`;
+const who = r => `<div class="who"><div class="av">${av(r.key, r.name)}</div><div><b>${esc(r.name || "Nomsiz")}</b><small>${esc(r.code || "")}${r.linked ? "" : ' · <span style="color:var(--orange)">bog\'lanmagan</span>'}</small></div></div>`;
+function statusPills(r){
+  let h = "";
+  if (r.late_min > 0) h += `<span class="pill p-late">⏰ Kechikdi ${r.late_min} daq</span>`;
+  if (r.inside) h += `<span class="pill p-in">● Ishda</span>`;
+  else if (r.last_out) h += `<span class="pill p-out">Ketgan</span>`;
+  else if (!r.late_min) h += `<span class="pill p-in">Keldi</span>`;
+  return h;
+}
+const match = r => { const q = $("q").value.trim().toLowerCase(); return !q || [r.name, r.code, r.dept].some(v => String(v||"").toLowerCase().includes(q)); };
+function renderDay(){
+  const d = data; if (!d) return;
+  const s = d.stats, pct = v => s.total ? Math.round(v / s.total * 100) + "%" : "0%";
+  $("sCame").textContent = `${s.came} / ${s.total}`; $("sLate").textContent = s.late; $("sAbsent").textContent = s.absent; $("sInside").textContent = s.inside;
+  $("bCame").style.width = pct(s.came); $("bLate").style.width = pct(s.late); $("bAbsent").style.width = pct(s.absent); $("bInside").style.width = pct(s.inside);
+  const rows = [];
+  d.rows.filter(match).forEach(r => rows.push(`<tr class="row" data-key="${esc(r.key)}" data-name="${esc(r.name)}">
+    <td>${who(r)}</td><td>${esc(r.dept) || '<span class="muted">—</span>'}</td>
+    <td class="num strong">${hm(r.first_in)}<small>${esc(r.first_term)}</small></td>
+    <td class="num">${r.inside ? "—" : (hm(r.last_out) || "—")}${!r.inside && r.last_out_term ? `<small>${esc(r.last_out_term)}</small>` : ""}</td>
+    <td class="num">${hmm(r.worked_min)}</td><td>${statusPills(r)}</td>
+    <td><div class="chips">${r.terminals.map(tpill).join("")}</div></td>
+    <td class="num">${r.count}</td><td style="text-align:right">${eyeBtn}</td></tr>`));
+  d.absent.filter(match).forEach(r => rows.push(`<tr class="absent"><td>${who(r)}</td><td>${esc(r.dept) || "—"}</td><td>—</td><td>—</td><td>—</td>
+    <td><span class="pill p-abs">✕ Kelmadi</span></td><td>—</td><td class="num">0</td><td></td></tr>`));
+  $("tableWrap").innerHTML = `<table><thead><tr><th>Xodim</th><th>Bo'lim</th><th>Keldi</th><th>Ketdi</th><th>Ishladi</th><th>Holat</th><th>Terminal</th><th>O'tishlar</th><th></th></tr></thead>
+    <tbody>${rows.join("") || `<tr class="empty"><td colspan="9">Bu kunga ma'lumot yo'q</td></tr>`}</tbody></table>`;
+  $("tableWrap").querySelectorAll("tr.row").forEach(tr => tr.onclick = () => openPerson(tr.dataset.key, tr.dataset.name, d.date));
+}
+
+/* ---------- oylik tabel */
+function renderMonth(){
+  const d = data; if (!d) return;
+  const rows = d.rows.filter(match);
+  const dayInfo = [];
+  let head = `<th>Xodim</th>`;
+  for (let i = 1; i <= d.days; i++){
+    const ds = `${d.month}-${String(i).padStart(2,"0")}`, wd = new Date(ds + "T12:00:00").getDay();
+    const cls = (wd === 0 ? "we" : "") + (ds === d.today ? " td" : "");
+    dayInfo.push({ds, cls, future: ds > d.today});
+    head += `<th class="${cls}">${i}<small>${DSHORT[wd]}</small></th>`;
+  }
+  head += `<th>Kun</th><th>Soat</th><th>Kech.</th>`;
+  const body = rows.map(r => {
+    let tds = `<td>${who(r)}</td>`;
+    dayInfo.forEach((di, k) => {
+      const v = r.days[String(k + 1)];
+      tds += !v ? `<td class="${di.cls} c-none">${di.future ? "" : "·"}</td>`
+        : `<td class="${di.cls} ${v.late > 0 ? "c-late" : ""}" data-day="${di.ds}" title="Keldi ${v.in}${v.out ? " · Ketdi " + v.out : ""}${v.late > 0 ? " · " + v.late + " daq kechikdi" : ""} · ${v.terms.join(", ")}">${hmm(v.w)}</td>`;
+    });
+    tds += `<td class="tot">${r.total_days}</td><td class="tot">${hmm(r.total_min)}</td><td class="tot" style="color:var(--orange)">${r.late_days || ""}</td>`;
+    return `<tr class="row" data-key="${esc(r.key)}" data-name="${esc(r.name)}">${tds}</tr>`;
+  }).join("");
+  $("tableWrap").innerHTML = `<table class="tabel"><thead><tr>${head}</tr></thead><tbody>${body || `<tr class="empty"><td colspan="${d.days + 4}">Ma'lumot yo'q</td></tr>`}</tbody></table>`;
+  $("tableWrap").querySelectorAll("td[data-day]").forEach(td => { td.style.cursor = "pointer"; td.onclick = () => { const tr = td.parentElement; openPerson(tr.dataset.key, tr.dataset.name, td.dataset.day); }; });
+}
+
+async function load(){
+  try{
+    const tq = tid ? `&terminal=${tid}` : "";
+    if (mode === "day"){ data = await j(`/api/day?date=${viewDate}${tq}`); renderDay(); }
+    else { data = await j(`/api/month?month=${viewMonth}${tq}`); renderMonth(); }
+    const n = new Date(); $("updTxt").textContent = `Yangilandi: ${String(n.getHours()).padStart(2,"0")}:${String(n.getMinutes()).padStart(2,"0")}`;
+  }catch(e){}
+}
+function setMode(m){
+  mode = m; setNav(m);
+  $("mDay").classList.toggle("on", m === "day"); $("mMonth").classList.toggle("on", m === "month");
+  $("date").hidden = m !== "day"; $("month").hidden = m !== "month"; $("dayStats").hidden = m !== "day";
+  load();
+}
+$("mDay").onclick = () => setMode("day");
+$("mMonth").onclick = () => setMode("month");
+$("prev").onclick = () => { if (mode === "day"){ viewDate = addDays(viewDate, -1); $("date").value = viewDate; } else { viewMonth = addMonths(viewMonth, -1); $("month").value = viewMonth; } load(); };
+$("next").onclick = () => { if (mode === "day"){ viewDate = addDays(viewDate, 1); $("date").value = viewDate; } else { viewMonth = addMonths(viewMonth, 1); $("month").value = viewMonth; } load(); };
+$("goToday").onclick = () => { viewDate = today; viewMonth = today.slice(0,7); $("date").value = viewDate; $("month").value = viewMonth; load(); };
+$("date").onchange = () => { viewDate = $("date").value || today; load(); };
+$("month").onchange = () => { viewMonth = $("month").value || today.slice(0,7); load(); };
+$("tfilter").onchange = () => { tid = $("tfilter").value; load(); };
+$("refresh").onclick = () => { pollState(); load(); };
+$("q").oninput = () => view === "sales" ? renderSales() : mode === "day" ? renderDay() : renderMonth();
+$("unlLink").onclick = () => showSettings("match");
+
+/* ---------- xodim rasmlari */
+async function openPerson(key, name, date, all){
+  const d = await j(`/api/person?key=${encodeURIComponent(key)}&date=${date}${tid && !all ? "&terminal=" + tid : ""}`);
+  $("pAv").innerHTML = av(key, name);
+  $("pName").textContent = name || "Nomsiz";
+  $("pSub").textContent = `${uzDate(date)} · ${d.events.length} ta o'tish`;
+  $("pGrid").innerHTML = d.events.map(e => `<div class="shot"><img alt="" src="/photo/${e.id}" onerror="this.style.visibility='hidden'"><div><b>${hms(e.time)}</b>${kpill(e.kind)}${tpill(e.terminal)}</div></div>`).join("") || `<p class="muted">Bu kunda o'tish yo'q</p>`;
+  openModal("mPerson");
+}
+
+/* ---------- modallar */
+const openModal = id => $(id).classList.add("open");
+const closeModal = m => m.classList.remove("open");
+$$(".modal").forEach(m => m.addEventListener("click", e => { if (e.target === m || e.target.closest("[data-close]")) closeModal(m); }));
+document.addEventListener("keydown", e => { if (e.key === "Escape") $$(".modal.open").forEach(closeModal); });
+
+function openExcel(){
+  if (mode === "month" && viewMonth){ const [y, m] = viewMonth.split("-").map(Number); $("from").value = `${viewMonth}-01`; $("to").value = `${viewMonth}-${String(new Date(y, m, 0).getDate()).padStart(2,"0")}`; }
+  else { $("from").value = viewDate; $("to").value = viewDate; }
+  $("rTerm").value = tid; openModal("mReport");
+}
+$("btnExcel").onclick = openExcel;
+$("exportBtn").onclick = () => { const f = $("from").value || today, t = $("to").value || f, r = $("rTerm").value; location.href = `/api/export.csv?from=${f}&to=${t}${r ? "&terminal=" + r : ""}`; };
+
+/* ================= SAVDO (BILLZ) ================= */
+let sv = "sales", per = "today", SD = null;
+const sum = n => Math.round(n || 0).toLocaleString("ru-RU").replace(/[ ,]/g, " ");
+const short = n => { n = n || 0; const a = Math.abs(n);
+  return a >= 1e9 ? (n/1e9).toFixed(2).replace(/\.?0+$/, "") + " mlrd" : a >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/, "") + " mln" : sum(n); };
+const qty = n => (Math.round((n || 0) * 100) / 100).toLocaleString("ru-RU").replace(/[ ,]/g, " ");
+function showSales(){
+  view = "sales"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = false; $("searchChip").hidden = false;
+  $("pageTitle").textContent = "Savdo (BILLZ)"; setNav("sales");
+  if (!$("sFrom").value) setPer(per, true);
+  loadSales();
+}
+function setPer(p, quiet){
+  per = p; $$("#perSeg button").forEach(b => b.classList.toggle("on", b.dataset.per === p));
+  let a = today, b = today;
+  if (p === "yday") a = b = addDays(today, -1);
+  if (p === "week") a = addDays(today, -6);
+  if (p === "month") a = today.slice(0, 7) + "-01";
+  $("sFrom").value = a; $("sTo").value = b;
+  if (!quiet) loadSales();
+}
+$$("#perSeg button").forEach(b => b.onclick = () => setPer(b.dataset.per));
+$$("#svTabs button").forEach(b => b.onclick = () => { sv = b.dataset.sv; $$("#svTabs button").forEach(x => x.classList.toggle("on", x === b)); loadSales(); });
+for (const id of ["sFrom", "sTo"]) $(id).onchange = () => { per = ""; $$("#perSeg button").forEach(b => b.classList.remove("on"));
+  if ($("sTo").value < $("sFrom").value) $("sTo").value = $("sFrom").value; loadSales(); };
+$("sRefresh").onclick = () => loadSales();
+$("bzGo").onclick = () => showSettings("billz");
+let salesSeq = 0;
+async function loadSales(){
+  $("perBox").style.display = sv === "sales" ? "contents" : "none";
+  const seq = ++salesSeq;
+  $("sUpd").textContent = sv === "stock" ? "Yuklanmoqda… (ombor birinchi marta ~20 soniya)" : (sv === "sales" && $("sFrom").value !== $("sTo").value ? "Yuklanmoqda… (birinchi marta biroz vaqt oladi)" : "Yuklanmoqda…");
+  const url = sv === "sales" ? `/api/sales?from=${$("sFrom").value}&to=${$("sTo").value}` : `/api/sales/${sv}`;
+  try{
+    const d = await j(url);
+    if (seq !== salesSeq) return;
+    SD = {kind: sv, ...d};
+    $("bzNot").hidden = d.connected !== false;
+    $("sErr").hidden = !d.error; $("sErr").textContent = d.error || "";
+    $("sUpd").textContent = d.fetched ? `BILLZ: ${hm(d.fetched)}` : "";
+    renderSales();
+  }catch(e){ if (seq === salesSeq){ $("sUpd").textContent = ""; } }
+}
+const qm = (...v) => { const q = $("q").value.trim().toLowerCase(); return !q || v.some(x => String(x || "").toLowerCase().includes(q)); };
+const hlist = (rows, total) => `<ul class="hl">${rows.map(r => `<li><span title="${esc(r.name)}">${esc(r.name)}</span><b>${short(r.total)}</b><div class="tr"><i style="width:${total ? Math.max(1, r.total / total * 100) : 0}%"></i></div></li>`).join("") || '<li class="muted">—</li>'}</ul>`;
+function renderSales(){
+  const d = SD, box = $("salesBody");
+  if (!d || d.connected === false || d.error){ box.innerHTML = ""; return; }
+  if (d.kind === "sales") return renderSalesMain(d, box);
+  if (d.kind === "stock") return renderStock(d, box);
+  if (d.kind === "debts") return renderDebts(d, box);
+}
+function renderSalesMain(d, box){
+  const avg = d.checks ? d.total / d.checks : 0;
+  const max = Math.max(1, ...d.series.map(p => p.v));
+  const step = Math.ceil(d.series.length / 12);
+  const bars = d.series.map((p, i) => { const lbl = d.one_day ? p.t.slice(11, 13) : p.t.slice(8, 10) + "." + p.t.slice(5, 7);
+    return `<div class="b" title="${esc(d.one_day ? p.t.slice(11,16) : p.t.slice(0,10))} — ${sum(p.v)} so'm"><i style="height:${p.v / max * 100}%"></i><small>${i % step ? "" : lbl}</small></div>`; }).join("");
+  const range = d.one_day ? uzDate(d.from) : `${d.from.slice(8,10)}.${d.from.slice(5,7)} — ${d.to.slice(8,10)}.${d.to.slice(5,7)}.${d.to.slice(0,4)}`;
+  const att = s => {
+    if (!s.staff_id) return `<td colspan="${d.one_day ? 3 : 2}" class="muted">—</td>`;
+    const a = s.att;
+    if (!a) return `<td colspan="${d.one_day ? 3 : 2}"><span class="pill p-abs">✕ Kelmagan</span></td>`;
+    return d.one_day
+      ? `<td class="num strong">${hm(a.first_in)}${a.late > 0 ? `<small style="color:var(--orange)">${a.late} daq kech</small>` : `<small>${esc(a.first_term || "")}</small>`}</td><td class="num">${a.inside ? '<span class="pill p-in">● Ishda</span>' : (hm(a.last_out) || "—")}</td><td class="num">${hmm(a.worked)}</td>`
+      : `<td class="num">${a.days} kun${a.late_days ? `<small style="color:var(--orange)">${a.late_days} kun kech</small>` : ""}</td><td class="num">${hmm(a.worked)}</td>`;
+  };
+  const staffOpts = s => `<option value="">— bog'lanmagan —</option>` + d.staff.map(x => `<option value="${x.id}" ${x.id === s.staff_id ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  const sellers = d.sellers.filter(s => qm(s.name, s.staff_name));
+  box.innerHTML = `
+    <div class="stats">
+      <div class="card stat" style="color:var(--teal)"><div class="l">Savdo · ${esc(range)}</div><div class="v sm">${short(d.total)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--green)"><div class="l">Cheklar soni</div><div class="v sm">${sum(d.checks)}</div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--lime)"><div class="l">O'rtacha chek</div><div class="v sm">${short(avg)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--orange)"><div class="l">Qaytarish / almashtirish</div><div class="v sm">${sum(d.refunds)} <small>/ ${sum(d.exchanges)}</small></div><div class="bar"><b style="width:${d.checks ? Math.min(100, d.refunds / d.checks * 100 * 10) : 0}%"></b></div></div>
+    </div>
+    <div class="sg2">
+      <div class="card pad"><div class="ct">${d.one_day ? "Soatlar bo'yicha savdo" : "Kunlar bo'yicha savdo"}<b>${sum(d.total)} so'm</b></div><div class="chart">${bars}</div></div>
+      <div class="col">
+        <div class="card pad"><div class="ct">Do'konlar</div>${hlist(d.shops, d.total)}</div>
+        <div class="card pad"><div class="ct">To'lov turlari</div>${hlist(d.payments, d.total)}</div>
+      </div>
+    </div>
+    <div class="secttl">Sotuvchilar — savdo va davomat</div>
+    <div class="card tablecard"><div class="tablewrap"><table><thead><tr><th>Sotuvchi (BILLZ)</th><th>Savdo</th><th>Ulushi</th><th>Xodim (davomat)</th>
+      ${d.one_day ? "<th>Keldi</th><th>Ketdi</th><th>Ishladi</th>" : "<th>Ish kunlari</th><th>Ishlagan soat</th>"}</tr></thead><tbody>
+      ${sellers.map(s => `<tr><td><div class="who"><div class="av">${av("b" + s.name, s.name, "data:,")}</div><b>${esc(s.name)}</b></div></td>
+        <td class="num strong">${sum(s.total)}<small>so'm</small></td>
+        <td><div class="share"><div class="tr"><i style="width:${s.share * 100}%"></i></div><small class="muted">${Math.round(s.share * 100)}%</small></div></td>
+        <td><select class="sel" data-seller="${esc(s.name)}" style="min-width:190px">${staffOpts(s)}</select>${s.auto ? '<small>ism bo\'yicha topildi</small>' : ""}</td>
+        ${att(s)}</tr>`).join("") || `<tr class="empty"><td colspan="${d.one_day ? 7 : 6}">Bu davrda savdo yo'q</td></tr>`}
+    </tbody></table></div></div>
+    <div class="secttl">Eng ko'p sotilgan mahsulotlar</div>
+    <div class="card tablecard"><div class="tablewrap"><table><thead><tr><th>#</th><th>Mahsulot</th><th>Soni</th><th>Sof savdo</th></tr></thead><tbody>
+      ${d.products.filter(p => qm(p.name)).map((p, i) => `<tr><td class="num muted">${i + 1}</td><td>${esc(p.name)}</td><td class="num">${p.qty != null ? qty(p.qty) : "—"}</td><td class="num strong">${sum(p.total)} so'm</td></tr>`).join("") || '<tr class="empty"><td colspan="4">Ma\'lumot yo\'q</td></tr>'}
+    </tbody></table></div></div>`;
+  box.querySelectorAll("select[data-seller]").forEach(s => s.onchange = async () => {
+    await post("/api/billz/link", {name: s.dataset.seller, staff_id: s.value || null}); loadSales();
+  });
+}
+function renderStock(d, box){
+  const units = d.units.map(u => `${qty(u.measurement_value)} ${esc(u.measurement_unit)}`).join(" · ");
+  const low = d.low.filter(p => qm(p.name, p.sku));
+  box.innerHTML = `
+    <div class="stats">
+      <div class="card stat" style="color:var(--teal)"><div class="l">Mahsulot turlari</div><div class="v sm">${sum(d.products)}</div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--green)"><div class="l">Jami qoldiq</div><div class="v sm">${qty(d.qty)}</div><div class="sub" style="margin-top:6px">${units}</div></div>
+      <div class="card stat" style="color:var(--lime)"><div class="l">Qoldiq tannarxi</div><div class="v sm">${short(d.supply)}<small>so'm</small></div><div class="bar"><b style="width:${d.retail ? d.supply / d.retail * 100 : 0}%"></b></div></div>
+      <div class="card stat" style="color:var(--teal)"><div class="l">Qoldiq sotuv narxida</div><div class="v sm">${short(d.retail)}<small>so'm</small></div><div class="sub" style="margin-top:6px">ustama: ${short(d.retail - d.supply)} so'm</div></div>
+    </div>
+    <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+      <div class="card stat" style="color:var(--orange)"><div class="l">Sotilyapti, lekin kam qolgan (≤3)</div><div class="v sm">${sum(d.small_left)}</div><div class="bar"><b style="width:${d.products ? Math.max(1, d.small_left / d.products * 100) : 0}%"></b></div></div>
+      <div class="card stat" style="color:var(--red)"><div class="l">Nol qoldiq (tugagan)</div><div class="v sm">${sum(d.zero_left)}</div><div class="bar"><b style="width:${d.products ? d.zero_left / d.products * 100 : 0}%"></b></div></div>
+      <div class="card stat" style="color:var(--red)"><div class="l">Minus qoldiqli mahsulotlar</div><div class="v sm">${sum(d.negative)}</div><div class="bar"><b style="width:${d.products ? d.negative / d.products * 100 : 0}%"></b></div></div>
+    </div>
+    <div class="secttl">Oxirgi 7 kunda sotilgan, lekin kam qolgan mahsulotlar</div>
+    <div class="card tablecard"><div class="tablewrap"><table><thead><tr><th>Mahsulot</th><th>Artikul</th><th>Qoldiq</th><th>7 kunda sotildi</th><th>Do'konlar bo'yicha qoldiq</th></tr></thead><tbody>
+      ${low.map(p => `<tr><td>${esc(p.name)}</td><td class="num muted">${esc(p.sku)}</td><td class="num strong" style="color:${p.qty <= 0 ? "var(--red)" : "var(--orange)"}">${qty(p.qty)} ${esc(p.unit)}</td>
+        <td class="num">${qty(p.sold7)} ${esc(p.unit)}</td>
+        <td><div class="chips">${p.shops.filter(s => s.name).map(s => `<span class="pill p-term">${esc(s.name)}: ${qty(s.qty)}</span>`).join("") || '<span class="muted">—</span>'}</div></td></tr>`).join("")
+        || `<tr class="empty"><td colspan="5">${d.small_left ? "Qidiruvga mos mahsulot yo'q" : "Kam qolgan mahsulot yo'q ✓"}</td></tr>`}
+    </tbody></table></div></div>`;
+}
+function renderDebts(d, box){
+  const rows = d.rows.filter(r => qm(r.name, r.phone, r.shop));
+  const max = Math.max(1, ...d.rows.map(r => r.debt));
+  box.innerHTML = `
+    <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+      <div class="card stat" style="color:var(--red)"><div class="l">Umumiy qarz</div><div class="v sm">${short(d.total)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--orange)"><div class="l">Qarzdor mijozlar</div><div class="v sm">${sum(d.debtors)}</div><div class="bar"><b style="width:${d.customers ? d.debtors / d.customers * 100 : 0}%"></b></div></div>
+      <div class="card stat" style="color:var(--teal)"><div class="l">Jami mijozlar</div><div class="v sm">${sum(d.customers)}</div><div class="bar"><b style="width:100%"></b></div></div>
+    </div>
+    <div class="card tablecard"><div class="tablewrap"><table><thead><tr><th>Mijoz</th><th>Telefon</th><th>Do'kon</th><th>Qarz</th><th></th><th>Jami xarid</th><th>Oxirgi xarid</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td><div class="who"><div class="av">${av("c" + r.phone, r.name, "data:,")}</div><b>${esc(r.name)}</b></div></td>
+        <td class="num">${esc(r.phone)}</td><td>${r.shop ? tpill(r.shop) : "—"}</td>
+        <td class="num strong" style="color:var(--red)">${sum(r.debt)} so'm</td>
+        <td><div class="share"><div class="tr"><i style="width:${r.debt / max * 100}%;background:var(--red)"></i></div></div></td>
+        <td class="num">${sum(r.purchases)} so'm</td><td class="num muted">${esc(r.last ? r.last.slice(8,10) + "." + r.last.slice(5,7) + "." + r.last.slice(0,4) + " " + r.last.slice(11,16) : "—")}</td></tr>`).join("")
+        || `<tr class="empty"><td colspan="7">${d.debtors ? "Qidiruvga mos mijoz yo'q" : "Qarzdor mijoz yo'q ✓"}</td></tr>`}
+    </tbody></table></div></div>`;
+}
+
+/* ================= SOZLAMALAR ================= */
+let curTab = "terminals", ST = null;
+$$(".snav button").forEach(b => b.onclick = () => openTab(b.dataset.st));
+function openTab(t){
+  curTab = t;
+  $$(".snav button").forEach(b => b.classList.toggle("on", b.dataset.st === t));
+  $$("[data-pane]").forEach(p => p.hidden = p.dataset.pane !== t);
+  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, accounts: loadUsers, general: loadGeneral})[t]();
+}
+
+/* --- terminallar */
+let TERMS = [];
+async function loadTerms(){
+  TERMS = (await j("/api/terminals")).terminals;
+  $("termList").innerHTML = TERMS.map(t => {
+    const [cls, txt] = termStatus(t);
+    return `<div class="titem"><h3>${esc(t.name)}</h3>
+      <div class="meta"><span class="${cls}" style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot"></span>${esc(txt)}</span><br>
+      ${esc(t.host)}:${t.port} · login: ${esc(t.username)}${t.model ? "<br>" + esc(t.model) : ""}<br>
+      o'tishlar: ${t.events_total} · terminaldagi ID lar: ${t.users_total}
+      ${t.error ? `<br><span class="bad">${esc(t.error)}</span>` : ""}</div>
+      <div class="acts"><button class="btn ghost sm" data-edit="${t.id}">Tahrirlash</button><button class="btn danger sm" data-del="${t.id}">O'chirish</button></div></div>`;
+  }).join("") || `<p class="muted">Hali terminal yo'q. "+ Terminal qo'shish" tugmasini bosing.</p>`;
+  $("termList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => termForm(TERMS.find(t => t.id == b.dataset.edit)));
+  $("termList").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const t = TERMS.find(x => x.id == b.dataset.del);
+    if (!confirm(`"${t.name}" terminalini o'chirasizmi?\n\nDiqqat: bu terminaldan kelgan barcha o'tishlar (${t.events_total} ta) ham dashboarddan o'chadi. Buni qaytarib bo'lmaydi.`)) return;
+    await post("/api/terminals/delete", {id: t.id}); loadTerms(); pollState();
+  });
+}
+let editTerm = null;
+function termForm(t){
+  editTerm = t || null;
+  $("tfTitle").textContent = t ? `${t.name} — tahrirlash` : "Terminal qo'shish";
+  $("tfName").value = t ? t.name : ""; $("tfHost").value = t ? t.host : ""; $("tfPort").value = t ? t.port : 80;
+  $("tfUser").value = t ? t.username : ""; $("tfPass").value = "";
+  $("tfPass").placeholder = t ? "O'zgartirmaslik uchun bo'sh qoldiring" : "Terminal paroli";
+  showErr("tfErr", ""); openModal("mTerm"); setTimeout(() => $("tfName").focus(), 50);
+}
+$("addTerm").onclick = () => termForm(null);
+$("termForm").onsubmit = async ev => {
+  ev.preventDefault();
+  const btn = $("tfBtn"); btn.disabled = true; btn.textContent = "Terminalga ulanilmoqda…"; showErr("tfErr", "");
+  try{
+    await post("/api/terminals/save", {id: editTerm ? editTerm.id : null, name: $("tfName").value.trim(), host: $("tfHost").value.trim(),
+      port: $("tfPort").value, username: $("tfUser").value.trim(), password: $("tfPass").value});
+    $("tfPass").value = ""; closeModal($("mTerm")); loadTerms(); pollState(); setTimeout(() => { initFeed(); }, 3000);
+  }catch(e){ showErr("tfErr", e.message); }
+  finally{ btn.disabled = false; btn.textContent = "Ulanib, saqlash"; }
+};
+
+/* --- xodimlar va moslash */
+async function loadStaff(){
+  ST = await j("/api/staff");
+  // xodimlar
+  $("staffBody").innerHTML = ST.staff.map(s => `<tr class="row" data-id="${s.id}">
+    <td><div class="who"><div class="av">${av("s" + s.id, s.name)}</div><b>${esc(s.name)}</b></div></td>
+    <td>${esc(s.code) || '<span class="muted">—</span>'}</td><td>${esc(s.dept) || '<span class="muted">—</span>'}</td>
+    <td><div class="chips">${s.links.map(l => `<span class="pill p-term">${esc(l.terminal)} · ID ${esc(l.emp)}</span>`).join("") || '<span class="pill p-unl">bog\'lanmagan</span>'}</div></td>
+    <td style="text-align:right"><button class="btn danger sm" data-sdel="${s.id}">O'chirish</button></td></tr>`).join("")
+    || `<tr class="empty"><td colspan="5">Hali xodim yo'q. "+ Xodim qo'shish" yoki "Moslash" bo'limidagi avtomatik bog'lashdan foydalaning.</td></tr>`;
+  $("staffBody").querySelectorAll("tr.row").forEach(tr => tr.onclick = e => { if (!e.target.closest("[data-sdel]")) staffForm(ST.staff.find(s => s.id == tr.dataset.id)); });
+  $("staffBody").querySelectorAll("[data-sdel]").forEach(b => b.onclick = async () => {
+    const s = ST.staff.find(x => x.id == b.dataset.sdel);
+    if (!confirm(`"${s.name}" xodimini o'chirasizmi? (O'tishlar o'chmaydi — ID lar bog'lanmagan bo'lib qoladi.)`)) return;
+    await post("/api/staff/delete", {id: s.id}); loadStaff(); pollState();
+  });
+  $("deptList").innerHTML = [...new Set(ST.staff.map(s => s.dept).filter(Boolean))].map(d => `<option value="${esc(d)}">`).join("");
+  // moslash
+  const only = $("onlyUnl").checked;
+  const staffOpts = sel => `<option value="">— bog'lanmagan —</option><option value="new">+ Yangi xodim yaratish</option>` +
+    ST.staff.map(s => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.name)}${s.code ? " (" + esc(s.code) + ")" : ""}</option>`).join("");
+  $("matchBody").innerHTML = ST.term_users.filter(u => !only || !u.staff_id).map(u => `<tr>
+    <td>${tpill(u.terminal)}</td><td class="num">${esc(u.emp)}</td><td>${esc(u.name) || '<span class="muted">—</span>'}</td>
+    <td><select class="sel" style="min-width:230px" data-t="${u.terminal_id}" data-e="${esc(u.emp)}">${staffOpts(u.staff_id)}</select>
+    ${u.staff_id ? "" : '<span class="pill p-unl" style="margin-left:6px">bog\'lanmagan</span>'}</td></tr>`).join("")
+    || `<tr class="empty"><td colspan="4">${only ? "Hamma ID lar bog'langan ✓" : "Terminallardan hali ID kelmadi"}</td></tr>`;
+  $("matchBody").querySelectorAll("select").forEach(s => s.onchange = async () => {
+    await post("/api/staff/link", {terminal_id: +s.dataset.t, emp: s.dataset.e, staff_id: s.value === "new" ? "new" : (s.value ? +s.value : null)});
+    loadStaff(); pollState();
+  });
+}
+$("onlyUnl").onchange = loadStaff;
+$("autoLink").onclick = async () => {
+  const d = await post("/api/staff/autolink");
+  $("autoMsg").textContent = `✓ ${d.linked} ta mavjud xodimga ulandi, ${d.created} ta yangi xodim yaratildi`;
+  loadStaff(); pollState();
+};
+let editStaff = null;
+function staffForm(s){
+  editStaff = s || null;
+  $("sfTitle").textContent = s ? "Xodimni tahrirlash" : "Xodim qo'shish";
+  $("sfName").value = s ? s.name : ""; $("sfCode").value = s ? s.code : ""; $("sfDept").value = s ? s.dept : "";
+  const mine = {}; (s ? s.links : []).forEach(l => mine[l.terminal_id] = l.emp);
+  $("sfLinks").innerHTML = ST.terminals.map(t => {
+    const opts = ST.term_users.filter(u => u.terminal_id === t.id && (!u.staff_id || (s && u.staff_id === s.id)));
+    return `<label class="field"><span>${esc(t.name)} terminalidagi ID</span><select data-tid="${t.id}">
+      <option value="">— yo'q —</option>${opts.map(u => `<option value="${esc(u.emp)}" ${mine[t.id] === u.emp ? "selected" : ""}>ID ${esc(u.emp)}${u.name ? " — " + esc(u.name) : ""}</option>`).join("")}</select></label>`;
+  }).join("") || `<p class="muted">Avval terminal qo'shing.</p>`;
+  showErr("sfErr", ""); openModal("mStaff"); setTimeout(() => $("sfName").focus(), 50);
+}
+$("addStaff").onclick = () => staffForm(null);
+$("staffForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("sfErr", "");
+  const links = [...$("sfLinks").querySelectorAll("select")].filter(s => s.value).map(s => ({terminal_id: +s.dataset.tid, emp: s.value}));
+  try{
+    await post("/api/staff/save", {id: editStaff ? editStaff.id : null, name: $("sfName").value.trim(), code: $("sfCode").value.trim(), dept: $("sfDept").value.trim(), links});
+    closeModal($("mStaff")); loadStaff(); pollState();
+  }catch(e){ showErr("sfErr", e.message); }
+};
+// ism tanlanganda — xodim ismi bo'sh bo'lsa, terminaldagi ismni qo'yish
+$("sfLinks").addEventListener("change", e => {
+  if (e.target.tagName === "SELECT" && !$("sfName").value.trim() && e.target.value){
+    const u = ST.term_users.find(u => u.terminal_id === +e.target.dataset.tid && u.emp === e.target.value);
+    if (u && u.name) $("sfName").value = u.name;
+  }
+});
+
+/* --- foydalanuvchilar */
+async function loadUsers(){
+  const d = await j("/api/users");
+  $("uList").innerHTML = d.users.map(u => `<li><div class="av">${av("u" + u.username, u.username, "data:,")}</div>
+    <b>${esc(u.username)}${u.username === d.me ? ' <span class="muted">(siz)</span>' : ""}</b>
+    ${u.username === d.me ? "" : `<button class="btn danger sm" data-udel="${esc(u.username)}">O'chirish</button>`}</li>`).join("");
+  $("uList").querySelectorAll("[data-udel]").forEach(b => b.onclick = async () => {
+    if (!confirm(`"${b.dataset.udel}" foydalanuvchisini o'chirasizmi?`)) return;
+    try{ await post("/api/users/delete", {username: b.dataset.udel}); loadUsers(); }catch(e){ showErr("uErr", e.message); }
+  });
+}
+$("uAdd").onsubmit = async ev => {
+  ev.preventDefault(); showErr("uErr", "");
+  try{ const u = $("nuUser").value.trim(); await post("/api/users/add", {username: u, password: $("nuPass").value});
+    showOk("uOk", `"${u}" qo'shildi`); $("nuUser").value = $("nuPass").value = ""; loadUsers(); }
+  catch(e){ showErr("uErr", e.message); }
+};
+$("uPw").onsubmit = async ev => {
+  ev.preventDefault(); showErr("pwErr", "");
+  try{ await post("/api/users/password", {old_password: $("pwOld").value, password: $("pwNew").value});
+    $("pwOld").value = $("pwNew").value = ""; showOk("pwOk", "Parol almashtirildi"); }
+  catch(e){ showErr("pwErr", e.message); }
+};
+
+/* --- telegram */
+let TG = null;
+const fmtDT = t => t ? `${t.slice(8,10)}.${t.slice(5,7)} ${t.slice(11,16)}` : "";
+function tgForm(){
+  return {enabled: $("tgOn").checked, chats: TG.chats, skip_repeat: $("tgSkip").checked,
+    terminals: (() => { const b = [...$("tgTerms").querySelectorAll("input")]; const on = b.filter(x => x.checked).map(x => +x.value);
+      return on.length === b.length ? [] : on; })()};
+}
+function paintTg(){
+  $("tgOn").checked = TG.enabled; $("tgOnTxt").textContent = TG.enabled ? "Yoqilgan" : "O'chiq";
+  $("tgTokLbl").textContent = TG.has_token ? `Bot tokeni (saqlangan: ${TG.token_hint})` : "Bot tokeni";
+  $("tgTok").placeholder = TG.has_token ? "Almashtirish uchun yangi tokenni qo'ying" : "123456789:AAH...";
+  $("tgBot").innerHTML = TG.bot ? `<span class="ok" style="font-weight:600">✓ Bot ulangan:</span> <a href="https://t.me/${esc(TG.bot)}" target="_blank" rel="noopener">@${esc(TG.bot)}</a>` : "";
+  $("tgChats").innerHTML = TG.chats.map((c, i) => `<li><span style="font-size:18px">💬</span><b>${esc(c.title)} <span class="tp">· ${esc(c.id)}</span></b><button class="btn danger sm" data-cdel="${i}">Olib tashlash</button></li>`).join("")
+    || `<li><span class="muted">Hali chat qo'shilmagan — xabarlar hech qayerga yuborilmaydi.</span></li>`;
+  $("tgChats").querySelectorAll("[data-cdel]").forEach(b => b.onclick = () => { TG.chats.splice(+b.dataset.cdel, 1); saveTg("Chat olib tashlandi"); });
+  const all = !TG.terminals.length;
+  $("tgTerms").innerHTML = (S ? S.terminals : []).map(t => `<label class="check"><input type="checkbox" value="${t.id}" ${all || TG.terminals.includes(t.id) ? "checked" : ""}> ${esc(t.name)}</label>`).join("") || `<span class="muted">Terminal yo'q</span>`;
+  $("tgSkip").checked = TG.skip_repeat;
+  const warn = TG.enabled && (!TG.has_token || !TG.chats.length);
+  $("stTg").hidden = !warn;
+  $("tgStat").innerHTML = [
+    TG.sent ? `Bu ishga tushgandan beri yuborildi: <b>${TG.sent}</b> ta xabar${TG.last_ok ? " · oxirgisi " + fmtDT(TG.last_ok) : ""}` : "",
+    TG.queue ? `Navbatda: ${TG.queue}` : "",
+    TG.last_error ? `<span class="bad">Oxirgi xato: ${esc(TG.last_error)}</span>` : "",
+    warn ? `<span class="bad">Bot yoqilgan, lekin ${!TG.has_token ? "token" : "chat"} kiritilmagan.</span>` : ""].filter(Boolean).join("<br>");
+}
+async function loadTg(){ TG = await j("/api/telegram"); $("tgFound").innerHTML = ""; paintTg(); }
+async function saveTg(okMsg, extra){
+  showErr("tgErr", "");
+  try{ const d = await post("/api/telegram/save", {...tgForm(), ...(extra || {})}); TG = d; paintTg(); if (okMsg) showOk("tgOk", okMsg); return true; }
+  catch(e){ showErr("tgErr", e.message); loadTg().catch(() => {}); return false; }
+}
+$("tgTokSave").onclick = async () => {
+  const token = $("tgTok").value.trim(); if (!token) return showErr("tgErr", "Tokenni kiriting");
+  const b = $("tgTokSave"); b.disabled = true; b.textContent = "Tekshirilmoqda…";
+  const ok = await saveTg("Token saqlandi", {token, enabled: TG.has_token ? $("tgOn").checked : true});
+  if (ok) $("tgTok").value = "";
+  b.disabled = false; b.textContent = "Saqlash";
+};
+$("tgOn").onchange = () => saveTg($("tgOn").checked ? "Bot yoqildi" : "Bot o'chirildi");
+$("tgSave").onclick = () => saveTg("Saqlandi");
+$("tgFind").onclick = async () => {
+  const b = $("tgFind"); b.disabled = true; showErr("tgErr", "");
+  try{
+    const d = await post("/api/telegram/find_chats");
+    const have = new Set(TG.chats.map(c => c.id));
+    const list = d.chats.filter(c => !have.has(c.id));
+    $("tgFound").innerHTML = list.map(c => `<li><span style="font-size:18px">${c.type === "shaxsiy" ? "👤" : c.type === "kanal" ? "📢" : "👥"}</span><b>${esc(c.title)} <span class="tp">· ${esc(c.type)} · ${esc(c.id)}</span></b><button class="btn sm" data-add="${esc(c.id)}" data-title="${esc(c.title)}">+ Qo'shish</button></li>`).join("")
+      || `<li><span class="muted">${d.chats.length ? "Topilgan chatlarning hammasi qo'shilgan." : `Hech narsa topilmadi. Telegram'da ${d.bot ? "@" + esc(d.bot) : "botingiz"}ga <b>/start</b> yozing (yoki guruhda xabar yozing) va yana bosing.`}</span></li>`;
+    $("tgFound").querySelectorAll("[data-add]").forEach(x => x.onclick = () => { TG.chats.push({id: x.dataset.add, title: x.dataset.title}); x.closest("li").remove(); saveTg("Chat qo'shildi"); });
+  }catch(e){ showErr("tgErr", e.message); }
+  finally{ b.disabled = false; }
+};
+$("tgManualAdd").onclick = () => {
+  const id = $("tgManual").value.trim(); if (!id) return;
+  TG.chats.push({id, title: id}); $("tgManual").value = ""; saveTg("Chat qo'shildi");
+};
+$("tgTest").onclick = async () => {
+  const b = $("tgTest"); b.disabled = true; b.textContent = "Yuborilmoqda…"; showErr("tgErr", "");
+  try{ if (await saveTg()){ const d = await post("/api/telegram/test"); showOk("tgOk", `✓ Sinov xabari ${d.sent} ta chatga yuborildi — Telegram'ni tekshiring`); loadTg(); } }
+  catch(e){ showErr("tgErr", e.message); }
+  finally{ b.disabled = false; b.textContent = "✈️ Sinov xabari yuborish"; }
+};
+
+/* --- billz */
+function paintBz(d){
+  $("bzOn").hidden = !d.connected;
+  $("bzInfo").textContent = [d.company, d.connected_at ? "· ulangan: " + fmtDT(d.connected_at) : ""].filter(Boolean).join(" ");
+  $("bzLbl").textContent = d.connected ? `BILLZ maxfiy kaliti (saqlangan: ${d.secret_hint})` : "BILLZ maxfiy kaliti";
+  $("bzKey").placeholder = d.connected ? "Almashtirish uchun yangi kalitni qo'ying" : "Secret key";
+}
+async function loadBz(){ paintBz(await j("/api/billz")); }
+$("bzForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("bzErr", "");
+  const secret = $("bzKey").value.trim(); if (!secret) return showErr("bzErr", "Kalitni kiriting");
+  const b = $("bzBtn"); b.disabled = true; b.textContent = "Tekshirilmoqda…";
+  try{ const d = await post("/api/billz/save", {secret}); $("bzKey").value = ""; paintBz(d); showOk("bzOk", "✓ BILLZ ulandi"); }
+  catch(e){ showErr("bzErr", e.message); }
+  finally{ b.disabled = false; b.textContent = "Ulash"; }
+};
+$("bzOff").onclick = async () => {
+  if (!confirm("BILLZ ulanishini uzasizmi? (Kalit o'chiriladi, BILLZ'dagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
+  paintBz(await post("/api/billz/save", {disconnect: true}));
+};
+
+/* --- ish vaqti */
+function loadGeneral(){ $("gWs").value = S.work_start; $("gGap").value = S.repeat_gap_seconds; }
+$("genForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("gErr", "");
+  try{ await post("/api/settings", {work_start: $("gWs").value, repeat_gap_seconds: $("gGap").value}); showOk("gOk", "Saqlandi"); pollState(); }
+  catch(e){ showErr("gErr", e.message); }
+};
+
+/* ---------- ishga tushirish */
+async function startApp(){
+  $("auth").hidden = true; $("app").hidden = false;
+  $("meAv").textContent = (me || "?")[0]; $("meAv").title = me || "";
+  stopTimers();
+  await pollState();
+  viewDate = today; viewMonth = today.slice(0,7);
+  $("date").value = viewDate; $("month").value = viewMonth;
+  showDash(mode);
+  await initFeed();
+  timers.push(setInterval(pollFeed, 1500), setInterval(pollState, 5000), setInterval(() => { if (view === "dash") load(); }, 30000));
+}
+(async function boot(){
+  try{
+    const s = await (await fetch("/api/auth/status", {cache:"no-store"})).json();
+    if (s.authed){ me = s.user; startApp(); } else showAuth(s.setup_needed);
+  }catch(e){ showAuth(false); showErr("aErr", "Server bilan aloqa yo'q"); }
+})();
+</script>
+</body>
+</html>

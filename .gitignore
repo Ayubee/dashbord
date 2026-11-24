@@ -1,0 +1,11 @@
+# Maxfiy sozlamalar: Telegram tokeni, BILLZ kaliti (server o'zi standart config.json yaratadi)
+config.json
+
+# Baza (terminal parollari), xodimlar rasmlari, zaxira nusxalar
+data/
+*.db
+
+# Python va muharrir fayllari
+__pycache__/
+*.pyc
+.claude/
