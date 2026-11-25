@@ -2204,13 +2204,14 @@ class CloudSync(threading.Thread):
                 return
 
 
-CLOUD_USERS_SENT = {}   # tid -> oxirgi yuborilgan ro'yxat (o'zgarmasa qayta yubormaymiz)
+CLOUD_USERS_SENT = {}   # tid -> (ro'yxat, vaqt): o'zgarmasa 30 daqiqada bir marta qayta yuboramiz
 
 
 def send_users_to_cloud(tid, users, groups=None):
     """Ofisdagi nusxa: terminal foydalanuvchilari (va departamentlar) ro'yxatini bulut serveriga yuboradi."""
     key = json.dumps([sorted(users), groups or []], ensure_ascii=False)
-    if CLOUD_USERS_SENT.get(tid) == key:
+    prev = CLOUD_USERS_SENT.get(tid)
+    if prev and prev[0] == key and time.time() - prev[1] < 1800:
         return
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     u = urlsplit(CFG.get("cloud_url") or "")
@@ -2225,7 +2226,7 @@ def send_users_to_cloud(tid, users, groups=None):
         r.read()
         conn.close()
         if r.status == 200:
-            CLOUD_USERS_SENT[tid] = key
+            CLOUD_USERS_SENT[tid] = (key, time.time())
     except Exception as e:
         print(f"[bulut] xodimlar ro'yxati yuborilmadi: {e}", flush=True)
 
