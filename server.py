@@ -31,12 +31,14 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 import webbrowser
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 # Bulut (Railway va h.k.): PORT beriladi, ma'lumotlar doimiy diskka (DATA_DIR, masalan /data volume) yoziladi
@@ -1767,6 +1769,383 @@ def sd_save(b):
     return 200, {"ok": True, **sd_public()}
 
 
+# ----------------------------------------------------------------- Oyliklar API (boshqa dashboarddan o'tishlarni o'qish)
+# "Oyliklar" dashboardi terminal o'tishlarini o'zi qabul qiladi. Uning egasi API (manzil + kalit) bersa, bizning
+# server o'tishlarni o'sha yerdan o'qib turadi — terminal sozlamasiga ham, ofis kompyuteriga ham bog'liq bo'lmaydi.
+# API formati oldindan noma'lum, shuning uchun javobdagi ro'yxat va maydonlar (ID, ism, vaqt, kirdi/ketdi, rasm)
+# nomlariga qarab avtomatik aniqlanadi. Biz faqat O'QIYMIZ (GET) — oyliklarda hech narsa o'zgarmaydi.
+class OyError(Exception):
+    pass
+
+
+OY_STATE = {"last_ok": None, "last_error": None, "last_added": 0, "last_rows": 0, "fields": None}
+OY_LOCK = threading.Lock()
+OY_AUTH = ("bearer", "token", "header", "query", "none")
+OY_F = {   # maydon nomi (kichik harf, _ - . siz) -> qaysi ma'lumot
+    "emp": ("employeenostring", "employeeno", "employeeid", "employeecode", "empno", "empid", "emp", "employee",
+            "workerid", "staffid", "personid", "personno", "userid", "cardno", "tabelno", "tabel", "code", "xodimid"),
+    "name": ("name", "fullname", "fio", "employeename", "personname", "workername", "staffname", "username",
+             "employeefullname", "xodim", "ism"),
+    "time": ("datetime", "time", "eventtime", "eventdatetime", "timestamp", "ts", "createdat", "created", "checktime",
+             "punchtime", "passtime", "vaqt", "at", "date"),
+    "date": ("date", "eventdate", "day", "sana"),
+    "status": ("attendancestatus", "direction", "inout", "type", "status", "kind", "eventtype", "action", "mode"),
+    "serial": ("serialno", "serial", "serialnumber"),
+    "rid": ("id", "eventid", "uuid", "pk", "_id"),
+    "photo": ("pictureurl", "picurl", "picture", "photourl", "photo", "imageurl", "image", "img", "snapshot",
+              "snapshoturl", "faceurl", "rasm"),
+    "verify": ("currentverifymode", "verifymode", "verify", "method"),
+}
+
+
+def oy_cfg():
+    c = {"url": "", "key": "", "auth": "bearer", "header": "X-API-Key", "param": "token", "terminal_id": None,
+         "notify": False, "interval": 60, "connected_at": None}
+    c.update(CFG.get("oyliklar") or {})
+    return c
+
+
+def oy_public():
+    c = oy_cfg()
+    k = c["key"]
+    t = db.q("SELECT name FROM terminals WHERE id=?", (c["terminal_id"],)) if c["terminal_id"] else []
+    return {"connected": bool(c["url"] and c["terminal_id"]), "url": c["url"], "auth": c["auth"],
+            "header": c["header"], "param": c["param"], "terminal_id": c["terminal_id"],
+            "terminal": t[0]["name"] if t else "", "notify": c["notify"], "interval": c["interval"],
+            "has_key": bool(k), "key_hint": ("…" + k[-4:]) if len(k) >= 8 else ("••••" if k else ""),
+            "connected_at": c["connected_at"], **OY_STATE}
+
+
+def _oy_norm(k):
+    return re.sub(r"[^a-z0-9]", "", str(k).lower())
+
+
+def _oy_flat(d, pre="", out=None, depth=0):
+    out = {} if out is None else out
+    for k, v in d.items():
+        nk = pre + _oy_norm(k)
+        if isinstance(v, dict) and depth < 2:
+            _oy_flat(v, nk, out, depth + 1)
+            if pre == "":   # ichki obyekt: {"employee": {"id": 5, "name": ".."}} -> employeeid, employeename
+                for kk, vv in v.items():
+                    if not isinstance(vv, (dict, list)):
+                        out.setdefault(_oy_norm(k) + _oy_norm(kk), vv)
+        elif not isinstance(v, list):
+            out.setdefault(nk, v)
+    return out
+
+
+def _oy_list(j, depth=0):
+    """Javob ichidagi eng uzun obyektlar ro'yxati (data / items / events / AcsEvent.InfoList ...)."""
+    if isinstance(j, list):
+        return j if any(isinstance(x, dict) for x in j) else []
+    best = []
+    if isinstance(j, dict) and depth < 4:
+        for v in j.values():
+            r = _oy_list(v, depth + 1)
+            if len(r) > len(best):
+                best = r
+    return best
+
+
+def _oy_pick(rows):
+    """Qaysi kalit nima ekanini birinchi 50 ta yozuvga qarab tanlaydi."""
+    keys = {}
+    for r in rows[:50]:
+        for k, v in r.items():
+            if v not in (None, "") and not isinstance(v, (dict, list)):
+                keys[k] = keys.get(k, 0) + 1
+    m = {}
+    for f, names in OY_F.items():
+        for n in names:
+            hit = [k for k in keys if k == n] or [k for k in keys if k.endswith(n) and f in ("emp", "name", "photo")
+                                                     and len(n) > 3]
+            if hit and hit[0] not in m.values():
+                m[f] = hit[0]
+                break
+    if m.get("time") and m.get("date") == m["time"]:
+        m.pop("date")
+    return m
+
+
+def _oy_time(v, day=None):
+    if v in (None, ""):
+        return None
+    sv = str(v).strip()
+    if isinstance(v, (int, float)) or re.fullmatch(r"\d{9,13}(\.\d+)?", sv):
+        x = float(v)
+        x = x / 1000 if x > 1e11 else x
+        return fmt_time(datetime.fromtimestamp(x).astimezone())
+    if day and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", sv):
+        sv = f"{day} {sv}"
+    m = re.fullmatch(r"(\d{2})[./](\d{2})[./](\d{4})[ T]*(.*)", sv)
+    if m:
+        sv = f"{m[3]}-{m[2]}-{m[1]} {m[4]}".strip()
+    sv = re.sub(r"Z$", "+00:00", sv)
+    try:
+        dt = datetime.fromisoformat(sv)
+    except ValueError:
+        return None
+    if len(sv) <= 10:   # faqat sana — o'tish vaqti emas
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=now_local().tzinfo)
+    return fmt_time(dt.astimezone(now_local().tzinfo))
+
+
+def _oy_status(v):
+    x = _oy_norm(v)
+    if not x:
+        return ""
+    for st in IN_ST + OUT_ST:
+        if x == st.lower():
+            return st
+    if x in ("in", "enter", "entry", "entrance", "kirdi", "kirish", "keldi", "kelish", "come", "arrive", "arrival",
+             "start", "checkedin", "1"):
+        return "checkIn"
+    if x in ("out", "exit", "leave", "ketdi", "ketish", "chiqdi", "chiqish", "left", "departure", "end",
+             "checkedout", "2"):
+        return "checkOut"
+    if re.search(r"(^|check|clock|punch)in$", x) or "kir" in x or "kel" in x:
+        return "checkIn"
+    if re.search(r"(^|check|clock|punch)out$", x) or "ket" in x or "chiq" in x:
+        return "checkOut"
+    return ""
+
+
+def oy_parse(raw):
+    """JSON javob -> (o'tishlar, maydonlar xaritasi)."""
+    try:
+        j = json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        raise OyError("API JSON qaytarmadi. Javob boshi: " + raw[:200].decode("utf-8", "replace"))
+    rows = [_oy_flat(r) for r in _oy_list(j) if isinstance(r, dict)]
+    if not rows:
+        if isinstance(j, dict) and any(_oy_norm(k) in ("error", "detail", "message") for k in j):
+            raise OyError("API xato qaytardi: " + json.dumps(j, ensure_ascii=False)[:300])
+        return [], {}
+    m = _oy_pick(rows)
+    if "emp" not in m or "time" not in m:
+        raise OyError("Javobda o'tishlar ro'yxati topildi, lekin xodim ID si va vaqt maydonlari aniqlanmadi. "
+                      "Maydonlar: " + ", ".join(sorted(rows[0])[:30]))
+    out = []
+    for r in rows:
+        emp = str(r.get(m["emp"]) or "").strip()
+        if emp.endswith(".0"):
+            emp = emp[:-2]
+        t = _oy_time(r.get(m["time"]), r.get(m["date"]) if m.get("date") else None)
+        if not emp or not t or len(emp) > 32:
+            continue
+        try:
+            serial = int(r[m["serial"]]) if m.get("serial") else None
+        except (TypeError, ValueError):
+            serial = None
+        rid = r.get(m["rid"]) if m.get("rid") else None
+        out.append({"emp": emp, "name": str(r.get(m.get("name"), "") or "")[:64], "time": t, "serial": serial,
+                    "rid": "" if rid is None else str(rid)[:64],
+                    "status": _oy_status(r.get(m["status"])) if m.get("status") else "",
+                    "verify": str(r.get(m.get("verify"), "") or "")[:32],
+                    "photo": str(r.get(m.get("photo"), "") or "") if m.get("photo") else ""})
+    return out, m
+
+
+def _oy_url(c, d1, d2):
+    u = c["url"].strip()
+    rep = {"{from}": d1, "{to}": d2, "{date}": d2, "{since}": d1}
+    if any(k in u for k in rep):
+        for k, v in rep.items():
+            u = u.replace(k, v)
+    else:
+        u += ("&" if "?" in u else "?") + urlencode({"from": d1, "to": d2})
+    if c["auth"] == "query" and c["key"]:
+        u += ("&" if "?" in u else "?") + urlencode({c["param"] or "token": c["key"]})
+    return u
+
+
+def _oy_headers(c):
+    h = {"User-Agent": "davomat-dashboard/1.0", "Accept": "application/json"}
+    k = c["key"]
+    if k and c["auth"] == "bearer":
+        h["Authorization"] = "Bearer " + k
+    elif k and c["auth"] == "token":
+        h["Authorization"] = "Token " + k
+    elif k and c["auth"] == "header":
+        h[c["header"] or "X-API-Key"] = k
+    return h
+
+
+def _oy_get(c, url, limit=30 << 20, timeout=40):
+    req = urllib.request.Request(url, headers=_oy_headers(c))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read(limit + 1)[:limit]
+    except urllib.error.HTTPError as e:
+        body = e.read(400).decode("utf-8", "replace")
+        if e.code in (401, 403):
+            raise OyError(f"Oyliklar kalitni qabul qilmadi ({e.code}). Kalit va kirish usulini tekshiring. {body[:150]}")
+        if e.code == 404:
+            raise OyError("API manzili topilmadi (404). Oyliklar egasi bergan manzilni to'liq yozing.")
+        raise OyError(f"Oyliklar xato qaytardi ({e.code}): {body[:200]}")
+    except (urllib.error.URLError, OSError) as e:
+        raise OyError(f"Oyliklar serveriga ulanib bo'lmadi: {getattr(e, 'reason', e)}")
+
+
+def oy_fetch(c, d1, d2):
+    st, ct, raw = _oy_get(c, _oy_url(c, d1, d2))
+    return oy_parse(raw)
+
+
+def _oy_photo(c, ref):
+    if not ref:
+        return None
+    if ref.startswith("data:image") and "," in ref:
+        try:
+            return base64.b64decode(ref.split(",", 1)[1])
+        except ValueError:
+            return None
+    if not ref.startswith(("http://", "https://", "/")):
+        return None
+    if ref.startswith("/"):
+        u = urlsplit(c["url"])
+        ref = f"{u.scheme}://{u.netloc}{ref}"
+    try:
+        st, ct, data = _oy_get(c, ref, limit=3 << 20, timeout=20)
+    except OyError:
+        return None
+    return data if data[:2] == b"\xff\xd8" else None
+
+
+def oy_store(c, evs):
+    """Yangi o'tishlarni bazaga yozadi. Ofis kompyuteridan kelgan (yoki terminaldan o'qilgan) xuddi shu o'tish
+    ikkinchi marta yozilmaydi: shu terminal, shu ID, ±3 soniya ichida o'tish bo'lsa — o'tkazib yuboriladi."""
+    tid, new, photos = c["terminal_id"], [], 0
+    for e in sorted(evs, key=lambda e: e["time"]):
+        t0 = parse_time(e["time"])
+        lo, hi = fmt_time(t0 - timedelta(seconds=3))[:19], fmt_time(t0 + timedelta(seconds=3))[:19]
+        if db.q("SELECT 1 FROM events WHERE terminal_id=? AND emp=? AND substr(time,1,19) BETWEEN ? AND ? LIMIT 1",
+                (tid, e["emp"], lo, hi)):
+            continue
+        serial = e["serial"]
+        if serial is None:
+            serial = int(hashlib.md5(f"oy|{e['rid']}|{e['time']}|{e['emp']}".encode()).hexdigest()[:12], 16)
+        eid = add_event(tid, {"employeeNoString": e["emp"], "name": e["name"], "time": e["time"], "serialNo": serial,
+                              "attendanceStatus": e["status"], "currentVerifyMode": e["verify"]})
+        if not eid:
+            continue
+        new.append(eid)
+        if e["photo"] and photos < 30:
+            photos += 1
+            img = _oy_photo(c, e["photo"])
+            if img:
+                with open(os.path.join(PHOTOS, f"{tid}_{serial}.jpg"), "wb") as f:
+                    f.write(img)
+    return new
+
+
+def oy_sync(days=1, notify=True):
+    c = oy_cfg()
+    if not (c["url"] and c["terminal_id"]):
+        return 0
+    with OY_LOCK:
+        d2 = now_local().date()
+        d1 = d2 - timedelta(days=max(0, days - 1))
+        try:
+            evs, m = oy_fetch(c, d1.isoformat(), d2.isoformat())
+        except OyError as e:
+            OY_STATE["last_error"] = f"{now_local().strftime('%d.%m %H:%M')} · {e}"
+            raise
+        new = oy_store(c, evs)
+        OY_STATE.update(last_ok=fmt_time(now_local()), last_error=None, last_added=len(new), last_rows=len(evs),
+                        fields=m)
+        if new:
+            print(f"[oyliklar] {len(new)} ta yangi o'tish olindi", flush=True)
+            if notify and c["notify"]:
+                tg_notify(new)
+        return len(new)
+
+
+class OyWorker(threading.Thread):
+    daemon = True
+
+    def run(self):
+        last = 0
+        while True:
+            time.sleep(5)
+            c = oy_cfg()
+            if DEMO or not (c["url"] and c["terminal_id"]):
+                continue
+            if time.time() - last < max(20, int(c["interval"] or 60)):
+                continue
+            last = time.time()
+            try:
+                oy_sync(days=1)
+            except Exception as e:
+                print(f"[oyliklar] {e}", flush=True)
+
+
+def _oy_input(b):
+    c = oy_cfg()
+    url = str(b.get("url") or "").strip()
+    if not re.fullmatch(r"https?://[^\s/?#]+[^\s]*", url) or len(url) > 500:
+        raise OyError("API manzilini to'liq yozing, masalan https://oyliklar-production.up.railway.app/api/events")
+    auth = str(b.get("auth") or "bearer")
+    if auth not in OY_AUTH:
+        raise OyError("Kirish usulini tanlang")
+    key = str(b.get("key") or "").strip()
+    if not key and auth != "none":
+        key = c["key"]
+        if not key:
+            raise OyError("Oyliklar bergan API kalitini (token) kiriting")
+    if len(key) > 1000 or re.search(r"[\r\n]", key):
+        raise OyError("Kalit noto'g'ri ko'rinishda")
+    header = str(b.get("header") or "X-API-Key").strip()
+    param = str(b.get("param") or "token").strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,64}", header) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", param):
+        raise OyError("Sarlavha yoki parametr nomi noto'g'ri")
+    try:
+        tid = int(b.get("terminal_id") or 0)
+    except (TypeError, ValueError):
+        tid = 0
+    if not db.q("SELECT 1 FROM terminals WHERE id=?", (tid,)):
+        raise OyError("O'tishlar qaysi terminalniki ekanini tanlang")
+    try:
+        interval = min(3600, max(20, int(b.get("interval") or 60)))
+    except (TypeError, ValueError):
+        interval = 60
+    return {**c, "url": url, "auth": auth, "key": "" if auth == "none" else key, "header": header, "param": param,
+            "terminal_id": tid, "notify": bool(b.get("notify")), "interval": interval}
+
+
+def oy_test(b):
+    """Saqlamasdan sinash: oxirgi 7 kunni o'qib, nechta o'tish va qaysi maydonlar topilganini ko'rsatadi."""
+    c = _oy_input(b)
+    d2 = now_local().date()
+    evs, m = oy_fetch(c, (d2 - timedelta(days=6)).isoformat(), d2.isoformat())
+    evs.sort(key=lambda e: e["time"], reverse=True)
+    return 200, {"ok": True, "rows": len(evs), "fields": m,
+                 "sample": [{k: e[k] for k in ("emp", "name", "time", "status")} | {"photo": bool(e["photo"])}
+                            for e in evs[:8]]}
+
+
+def oy_save(b):
+    if b.get("disconnect"):
+        CFG["oyliklar"] = {}
+        save_config(CFG)
+        OY_STATE.update(last_ok=None, last_error=None, last_added=0, last_rows=0, fields=None)
+        return 200, {"ok": True, **oy_public()}
+    c = _oy_input(b)
+    d2 = now_local().date()
+    oy_fetch(c, (d2 - timedelta(days=1)).isoformat(), d2.isoformat())   # ishlashini tekshiramiz
+    c["connected_at"] = fmt_time(now_local())
+    CFG["oyliklar"] = c
+    save_config(CFG)
+    try:
+        oy_sync(days=min(62, max(1, int(b.get("backfill") or 1))), notify=False)   # tarix — Telegram'siz
+    except OyError:
+        pass
+    return 200, {"ok": True, **oy_public()}
+
+
 # ----------------------------------------------------------------- dashboard foydalanuvchilari
 SESSION_DAYS = 30
 FAILS = {}
@@ -2841,6 +3220,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, {"connected": True, "error": str(e)})
             if p == "/api/salesdoc":
                 return self.send(200, sd_public())
+            if p == "/api/oyliklar":
+                return self.send(200, oy_public())
             if p == "/api/expenses":
                 if not sd_public()["connected"]:
                     return self.send(200, {"connected": False})
@@ -3020,6 +3401,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(*autolink())
             if p == "/api/billz/link":
                 return self.send(*billz_link_seller(body))
+            if p in ("/api/oyliklar/save", "/api/oyliklar/test", "/api/oyliklar/sync"):
+                try:
+                    if p.endswith("save"):
+                        return self.send(*oy_save(body))
+                    if p.endswith("test"):
+                        return self.send(*oy_test(body))
+                    try:
+                        days = min(62, max(1, int(body.get("days") or 1)))
+                    except (TypeError, ValueError):
+                        days = 1
+                    return self.send(200, {"ok": True, "added": oy_sync(days=days, notify=False), **oy_public()})
+                except OyError as e:
+                    return self.send(400, {"error": str(e)})
             if p == "/api/salesdoc/save":
                 try:
                     return self.send(*sd_save(body))
@@ -3094,6 +3488,7 @@ def main():
     TgWorker().start()
     Forwarder().start()
     CloudSync().start()
+    OyWorker().start()
     if DEMO:
         demo_setup()
         DemoGen().start()

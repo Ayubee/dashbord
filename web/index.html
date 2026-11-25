@@ -626,6 +626,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
           <button data-st="telegram">✈️ Telegram bot <span class="n" id="stTg" hidden>!</span></button>
           <button data-st="billz">🛒 BILLZ</button>
           <button data-st="salesdoc">💸 SalesDoc</button>
+          <button data-st="oyliklar">🔌 Oyliklar API <span class="n" id="stOy" hidden>!</span></button>
           <button data-st="accounts">🔑 Foydalanuvchilar</button>
           <button data-st="general">⏰ Ish vaqti</button>
           <button data-st="backup">💾 Zaxira</button>
@@ -789,6 +790,43 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               <button class="btn" id="sdBtn" type="submit">Ulash</button>
               <div class="ferr" id="sdErr"></div><div class="okmsg" id="sdOk"></div>
             </form>
+          </div>
+          <!-- oyliklar -->
+          <div data-pane="oyliklar" hidden>
+            <h2>Oyliklar API</h2><p class="desc">Terminal o'tishlarni <b>oyliklar</b> dashboardiga yuboradi. Oyliklar egasi API manzili va kalitini bersa, shu yerga yozing: dashboard o'tishlarni <b>to'g'ridan-to'g'ri oyliklardan</b> o'qib turadi. Ofis kompyuteri ham, terminal sozlamasini o'zgartirish ham kerak bo'lmaydi. Dashboard oyliklardan faqat <b>o'qiydi</b>, u yerda hech narsani o'zgartirmaydi.</p>
+            <div id="oyOn" hidden>
+              <ul class="ulist"><li><span style="font-size:18px">🔌</span><b><span class="ok" style="font-weight:600">✓ Oyliklar ulangan</span> <span class="tp" id="oyInfo"></span></b>
+                <button class="btn danger sm" id="oyOff" type="button">Uzish</button></li></ul>
+              <div class="tokrow" style="margin:10px 0 4px">
+                <label class="field" style="margin:0;min-width:180px"><span>Qayta yuklash</span><select id="oyDays"><option value="1">Bugun</option><option value="7">Oxirgi 7 kun</option><option value="31">Oxirgi 31 kun</option><option value="62">Oxirgi 62 kun</option></select></label>
+                <button class="btn ghost" id="oyNow" type="button">⟳ Hozir yuklash</button>
+              </div>
+              <div class="ferr" id="oyStErr"></div><div class="okmsg" id="oyStOk"></div>
+            </div>
+            <form id="oyForm" style="max-width:640px" autocomplete="off">
+              <label class="field"><span>API manzili (oyliklar egasi beradi)</span><input id="oyUrl" autocapitalize="off" spellcheck="false" placeholder="https://oyliklar-production.up.railway.app/api/..."></label>
+              <p class="muted" style="margin:-4px 0 12px;font-size:12.5px">Davr manzilga <code>?from=YYYY-MM-DD&amp;to=YYYY-MM-DD</code> qilib qo'shiladi. API boshqa nom ishlatsa, manzil ichida <code>{from}</code>, <code>{to}</code> yoki <code>{date}</code> deb yozing.</p>
+              <div class="row2">
+                <label class="field"><span>Kalit qanday yuboriladi</span><select id="oyAuth">
+                  <option value="bearer">Authorization: Bearer &lt;kalit&gt;</option>
+                  <option value="token">Authorization: Token &lt;kalit&gt;</option>
+                  <option value="header">Alohida sarlavha (masalan X-API-Key)</option>
+                  <option value="query">Manzil parametri (?token=…)</option>
+                  <option value="none">Kalitsiz</option></select></label>
+                <label class="field" id="oyHdrF" hidden><span>Sarlavha nomi</span><input id="oyHdr" value="X-API-Key" spellcheck="false"></label>
+                <label class="field" id="oyPrmF" hidden><span>Parametr nomi</span><input id="oyPrm" value="token" spellcheck="false"></label>
+              </div>
+              <label class="field" id="oyKeyF"><span id="oyKeyLbl">API kaliti (token)</span><input id="oyKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Oyliklar bergan kalit"></label>
+              <div class="row2">
+                <label class="field"><span>Qaysi terminalning o'tishlari</span><select id="oyTerm"></select></label>
+                <label class="field"><span>Necha soniyada tekshiriladi</span><input id="oyInt" type="number" min="20" max="3600" value="60"></label>
+              </div>
+              <label class="field" id="oyBackF"><span>Ulanganda o'tgan kunlarni ham yuklash</span><select id="oyBack"><option value="1">Faqat bugun</option><option value="7">Oxirgi 7 kun</option><option value="31" selected>Oxirgi 31 kun</option><option value="62">Oxirgi 62 kun</option></select></label>
+              <label class="check" style="margin:2px 0 14px"><input type="checkbox" id="oyTg"> Oyliklardan kelgan yangi o'tishlarni Telegram'ga yuborish (ofis kompyuteri ham yuborayotgan bo'lsa, xabar ikki marta keladi)</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" id="oyTest" type="button">Sinab ko'rish</button><button class="btn" id="oyBtn" type="submit">Ulash</button></div>
+              <div class="ferr" id="oyErr"></div><div class="okmsg" id="oyOk"></div>
+            </form>
+            <div id="oyPrev" style="margin-top:14px"></div>
           </div>
           <!-- umumiy -->
           <div data-pane="general" hidden>
@@ -1428,7 +1466,7 @@ function openTab(t){
   curTab = t;
   $$(".snav button").forEach(b => b.classList.toggle("on", b.dataset.st === t));
   $$("[data-pane]").forEach(p => p.hidden = p.dataset.pane !== t);
-  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, salesdoc: loadSd, accounts: loadUsers, general: loadGeneral, backup: () => {}})[t]?.();
+  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, salesdoc: loadSd, oyliklar: loadOy, accounts: loadUsers, general: loadGeneral, backup: () => {}})[t]?.();
 }
 
 /* --- terminallar */
@@ -1844,6 +1882,79 @@ $("sdForm").onsubmit = async ev => {
 $("sdOff").onclick = async () => {
   if (!confirm("SalesDoc ulanishini uzasizmi? (Login/parol dashboarddan o'chiriladi, SalesDoc'dagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
   paintSd(await post("/api/salesdoc/save", {disconnect: true})); $("sdUser").value = "";
+};
+
+/* --- oyliklar API */
+const OY_FN = {emp: "Xodim ID", name: "Ism", time: "Vaqt", date: "Sana", status: "Kirdi/ketdi", serial: "Tartib raqami", rid: "Yozuv ID", photo: "Rasm", verify: "Usul"};
+function oyAuthUi(){
+  const a = $("oyAuth").value;
+  $("oyHdrF").hidden = a !== "header"; $("oyPrmF").hidden = a !== "query"; $("oyKeyF").hidden = a === "none";
+}
+$("oyAuth").onchange = oyAuthUi;
+function oyFields(f){
+  return f ? Object.entries(f).map(([k, v]) => `<span class="tp" style="margin-right:10px">${esc(OY_FN[k] || k)}: <b>${esc(v)}</b></span>`).join("") : "";
+}
+function paintOy(d){
+  $("oyOn").hidden = !d.connected;
+  $("stOy").hidden = !(d.connected && d.last_error);
+  const st = d.last_error ? `· ⚠ ${d.last_error}` : d.last_ok ? `· oxirgi tekshiruv ${fmtDT(d.last_ok)}, ${d.last_rows} ta yozuv, ${d.last_added} ta yangi` : "";
+  $("oyInfo").textContent = [d.terminal ? "→ " + d.terminal : "", d.connected_at ? "· ulangan: " + fmtDT(d.connected_at) : "", st].filter(Boolean).join(" ");
+  $("oyTerm").innerHTML = (S.terminals || []).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  if (d.terminal_id) $("oyTerm").value = d.terminal_id;
+  if (d.url) $("oyUrl").value = d.url;
+  if (d.auth) $("oyAuth").value = d.auth;
+  if (d.header) $("oyHdr").value = d.header;
+  if (d.param) $("oyPrm").value = d.param;
+  if (d.interval) $("oyInt").value = d.interval;
+  $("oyTg").checked = !!d.notify;
+  $("oyKeyLbl").textContent = d.has_key ? `API kaliti (saqlangan ${d.key_hint} — almashtirish uchun yangisini yozing)` : "API kaliti (token)";
+  $("oyBackF").hidden = !!d.connected;
+  $("oyBtn").textContent = d.connected ? "Saqlash" : "Ulash";
+  oyAuthUi();
+  if (d.connected && d.fields && !$("oyPrev").dataset.test) $("oyPrev").innerHTML = `<div class="muted" style="font-size:12.5px;margin-bottom:6px">Aniqlangan maydonlar:</div>${oyFields(d.fields)}`;
+}
+async function loadOy(){ paintOy(await j("/api/oyliklar")); }
+function oyBody(){
+  return {url: $("oyUrl").value.trim(), auth: $("oyAuth").value, key: $("oyKey").value.trim(), header: $("oyHdr").value.trim(),
+          param: $("oyPrm").value.trim(), terminal_id: +$("oyTerm").value, interval: +$("oyInt").value,
+          notify: $("oyTg").checked, backfill: +$("oyBack").value};
+}
+$("oyTest").onclick = async () => {
+  showErr("oyErr", ""); $("oyPrev").innerHTML = "";
+  const b = $("oyTest"), txt = b.textContent; b.disabled = true; b.textContent = "Tekshirilmoqda…";
+  try{
+    const d = await post("/api/oyliklar/test", oyBody());
+    $("oyPrev").dataset.test = "1";
+    const st = {checkIn: "Kirdi", checkOut: "Ketdi", breakIn: "Kirdi", breakOut: "Ketdi", overtimeIn: "Kirdi", overtimeOut: "Ketdi"};
+    $("oyPrev").innerHTML = `<div class="okmsg" style="display:block">✓ API ishladi — oxirgi 7 kunda ${d.rows} ta o'tish topildi</div>
+      <div style="margin:8px 0">${oyFields(d.fields)}</div>
+      ${d.sample.length ? `<div class="tablewrap"><table><thead><tr><th>ID</th><th>Ism</th><th>Vaqt</th><th>Kirdi/ketdi</th><th>Rasm</th></tr></thead><tbody>${
+        d.sample.map(e => `<tr><td class="num">${esc(e.emp)}</td><td>${esc(e.name) || '<span class="muted">—</span>'}</td><td class="num">${esc(fmtDT(e.time))}</td><td>${st[e.status] || '<span class="muted">—</span>'}</td><td>${e.photo ? "✓" : '<span class="muted">—</span>'}</td></tr>`).join("")
+      }</tbody></table></div>` : ""}`;
+  }catch(e){ showErr("oyErr", e.message); }
+  finally{ b.disabled = false; b.textContent = txt; }
+};
+$("oyForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("oyErr", "");
+  const b = $("oyBtn"), txt = b.textContent; b.disabled = true; b.textContent = "Ulanmoqda…";
+  try{
+    const d = await post("/api/oyliklar/save", oyBody());
+    $("oyKey").value = ""; delete $("oyPrev").dataset.test; paintOy(d);
+    showOk("oyOk", `✓ Saqlandi — ${d.last_added || 0} ta yangi o'tish olindi`); pollState();
+  }catch(e){ showErr("oyErr", e.message); b.textContent = txt; }
+  finally{ b.disabled = false; }
+};
+$("oyNow").onclick = async () => {
+  showErr("oyStErr", "");
+  const b = $("oyNow"), txt = b.textContent; b.disabled = true; b.textContent = "Yuklanmoqda…";
+  try{ const d = await post("/api/oyliklar/sync", {days: +$("oyDays").value}); paintOy(d); showOk("oyStOk", `✓ ${d.added} ta yangi o'tish qo'shildi`); pollState(); }
+  catch(e){ showErr("oyStErr", e.message); loadOy(); }
+  finally{ b.disabled = false; b.textContent = txt; }
+};
+$("oyOff").onclick = async () => {
+  if (!confirm("Oyliklar ulanishini uzasizmi? (Kalit dashboarddan o'chiriladi. Olingan o'tishlar qoladi, oyliklardagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
+  delete $("oyPrev").dataset.test; $("oyPrev").innerHTML = ""; $("oyUrl").value = "";
+  paintOy(await post("/api/oyliklar/save", {disconnect: true}));
 };
 
 /* --- ish vaqti */
