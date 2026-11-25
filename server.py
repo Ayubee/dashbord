@@ -940,10 +940,6 @@ def tg_deliver(c, info, photo):
 
 def tg_notify(ids):
     c = tg_cfg()
-    # Terminal hodisalarni bulut serveriga ham yuborayotgan bo'lsa, Telegram'ni bulut yuboradi —
-    # ofisdagi nusxa ikkinchi marta yubormaydi.
-    if CFG.get("cloud_url") and not CLOUD:
-        return
     if c["enabled"] and c["token"] and c["chats"]:
         for i in ids:
             TG_Q.put(i)
@@ -1796,6 +1792,63 @@ def set_forward(tid, token, b):
     return 200, {"ok": True, "forward": bool(url)}
 
 
+class CloudSync(threading.Thread):
+    """Ofisdagi nusxa -> bulut: terminaldan olingan o'tishlarni (rasmi bilan) bulut serveriga yetkazadi.
+    Bulut qaysi vaqtgacha bilishini so'raydi va undan keyingilarni yuboradi — shuning uchun ofis kompyuteri
+    yoki bulut bir muddat o'chiq bo'lsa ham, yoqilgach hammasi o'zi to'ldiriladi. Telegram'ni ofis yuboradi."""
+    daemon = True
+
+    def run(self):
+        while True:
+            try:
+                if CFG.get("cloud_url") and not CLOUD and not DEMO:
+                    for t in terminals(with_password=True):
+                        if t["active"]:
+                            self.sync(t)
+            except Exception as e:
+                print(f"[bulut] sinxron xatosi: {e}", flush=True)
+            time.sleep(20)
+
+    @staticmethod
+    def _post(path, body, headers):
+        u = urlsplit(CFG["cloud_url"])
+        conn = http.client.HTTPSConnection(u.hostname, u.port, timeout=60)
+        conn.request("POST", path, body, headers)
+        r = conn.getresponse()
+        data = r.read()
+        conn.close()
+        return r.status, data
+
+    def sync(self, t):
+        t = {**t, **db.q("SELECT mac, serial FROM terminals WHERE id=?", (t["id"],))[0]}
+        base = f"/hook/{t['id']}/{push_token(t)}"
+        st, data = self._post(base + "/status", b'{"office": true}', {"Content-Type": "application/json"})
+        if st != 200:
+            return
+        last = (json.loads(data or b"{}").get("last_event") or {}).get("time") or ""
+        evs = db.q("SELECT * FROM events WHERE terminal_id=? AND time>? ORDER BY time LIMIT 200", (t["id"], last))
+        for e in evs:
+            ev = {"dateTime": e["time"], "eventType": "AccessControllerEvent",
+                  "AccessControllerEvent": {"majorEventType": 5, "name": e["name"], "employeeNoString": e["emp"],
+                                            "serialNo": e["serial"], "attendanceStatus": e["att_status"],
+                                            "currentVerifyMode": e["verify"]}}
+            b = "----sync" + uuid.uuid4().hex
+            body = (f"--{b}\r\nContent-Disposition: form-data; name=\"event_log\"\r\n"
+                    f"Content-Type: application/json\r\n\r\n{json.dumps(ev, ensure_ascii=False)}\r\n").encode()
+            try:
+                ph = get_photo(e["id"])
+            except Exception:
+                ph = None
+            if ph and ph[1] == "image/jpeg":
+                body += (f"--{b}\r\nContent-Disposition: form-data; name=\"Picture\"; filename=\"p.jpg\"\r\n"
+                         f"Content-Type: image/jpeg\r\n\r\n").encode() + ph[0] + b"\r\n"
+            body += f"--{b}--\r\n".encode()
+            st, _ = self._post(base, body, {"Content-Type": f"multipart/form-data; boundary={b}",
+                                            "X-Davomat-Replay": "1"})
+            if st != 200:
+                return
+
+
 CLOUD_USERS_SENT = {}   # tid -> oxirgi yuborilgan ro'yxat (o'zgarmasa qayta yubormaymiz)
 
 
@@ -1862,11 +1915,15 @@ def add_term_user_manual(b):
     return 200, {"ok": True}
 
 
-def push_status(tid, token):
+def push_status(tid, token, office=False):
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     if not rows or not hmac.compare_digest(push_token(rows[0]), token):
         return 404, {"error": "topilmadi"}
     st = TSTATE.get(tid, {})
+    if office:   # ofisdagi nusxa terminalni ko'rib turibdi va sinxronlayapti
+        st = TSTATE.setdefault(tid, {})
+        st.update(connected=True, error=None, need_login=False, push=True, office=True,
+                  last_poll=fmt_time(now_local()))
     last = db.q("SELECT time, emp FROM events WHERE terminal_id=? ORDER BY time DESC LIMIT 1", (tid,))
     users = [r["emp"] for r in db.q("SELECT emp FROM term_users WHERE terminal_id=?", (tid,))]
     return 200, {"last_push": st.get("last_poll"), "connected": st.get("connected"), "forward": bool(forward_url(tid)),
@@ -2169,7 +2226,8 @@ def terminals_info():
         out.append({**t, "connected": st.get("connected", False), "error": st.get("error"),
                     "need_login": st.get("need_login", False), "last_poll": st.get("last_poll"),
                     "model": (st.get("device") or {}).get("model", ""), "events_total": agg["n"],
-                    "last_event": agg["last"], "users_total": users, "push": bool(st.get("push"))})
+                    "last_event": agg["last"], "users_total": users, "push": bool(st.get("push")),
+                    "office": bool(st.get("office"))})
     return out
 
 
@@ -2311,7 +2369,8 @@ class Handler(BaseHTTPRequestHandler):
                                        "repeat_gap_seconds": CFG.get("repeat_gap_seconds"),
                                        "terminals": [{k: t[k] for k in ("id", "name", "host", "connected", "error",
                                                                          "need_login", "last_poll", "model",
-                                                                         "events_total", "last_event", "active", "push")}
+                                                                         "events_total", "last_event", "active", "push",
+                                                                         "office")}
                                                      for t in terminals_info()],
                                        "unlinked": unlinked_count(make_ctx())})
             if p == "/api/terminals":
@@ -2392,7 +2451,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self.send(400, {"error": "Noto'g'ri so'rov"})
             tid, tok, what = int(m.group(1)), m.group(2), m.group(3)
-            fn = {"forward": lambda: set_forward(tid, tok, b), "status": lambda: push_status(tid, tok),
+            fn = {"forward": lambda: set_forward(tid, tok, b),
+                  "status": lambda: push_status(tid, tok, office=b.get("office") is True),
                   "users": lambda: receive_users(tid, tok, b)}[what]
             return self.send(*fn())
         m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
@@ -2567,6 +2627,7 @@ def main():
     db = DB(os.path.join(DATA, "demo.db" if DEMO else "attendance.db"))
     TgWorker().start()
     Forwarder().start()
+    CloudSync().start()
     if DEMO:
         demo_setup()
         DemoGen().start()

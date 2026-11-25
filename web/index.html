@@ -935,7 +935,9 @@ async function pollState(){
 }
 function termStatus(t){
   if (!t.active) return ["muted", "O'chirib qo'yilgan · tarixi saqlanadi"];
-  if (t.connected) return ["ok", `${t.push ? "Internet orqali ulangan" : "Ulangan"} · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
+  if (t.connected && t.office && t.last_poll && new Date(S.now) - new Date(t.last_poll) > 120000)
+    return ["warn", `Ofis kompyuteri javob bermayapti · oxirgi aloqa ${ago(t.last_poll, S.now)} · yoqilganda o'tishlar o'zi keladi`];
+  if (t.connected) return ["ok", `${t.office ? "Ofis kompyuteri orqali" : t.push ? "Internet orqali ulangan" : "Ulangan"} · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
   if (t.need_login) return ["bad", "Login/parol kerak"];
   return ["warn", "Ulanmagan"];
 }
