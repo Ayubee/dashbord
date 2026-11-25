@@ -1725,7 +1725,9 @@ def _push_parts(ctype, body):
             except ValueError:
                 pass
         elif txt.startswith("<") and event is None:
-            g = lambda k: (re.search(f"<{k}>([^<]*)</{k}>", txt) or [None, None])[1]
+            def g(k):
+                m = re.search(f"<{k}>([^<]*)</{k}>", txt)
+                return html.unescape(m.group(1)).strip() if m else None
             event = {"eventType": g("eventType"), "dateTime": g("dateTime"),
                      "AccessControllerEvent": {k: g(k) for k in ("majorEventType", "subEventType", "name",
                                                                  "employeeNoString", "serialNo", "attendanceStatus",
@@ -1733,10 +1735,82 @@ def _push_parts(ctype, body):
     return event, pic
 
 
+# Uzatish (relay): terminal faqat bitta manzilga yubora oladi. Agar u ilgari boshqa tizimga (masalan oyliklar
+# hisoblash) yuborgan bo'lsa — dashboard har bir so'rovni O'ZGARTIRMASDAN o'sha manzilga ham uzatadi.
+FWD_Q = queue.Queue(maxsize=5000)
+FWD_STATE = {}   # tid -> {"ok": n, "fail": n, "last_status": .., "last_at": ..}
+
+
+def forward_url(tid):
+    return (CFG.get("forward") or {}).get(str(tid))
+
+
+class Forwarder(threading.Thread):
+    daemon = True
+
+    def run(self):
+        while True:
+            tid, url, ctype, body, tries = FWD_Q.get()
+            st = FWD_STATE.setdefault(tid, {"ok": 0, "fail": 0})
+            try:
+                u = urlsplit(url)
+                conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(
+                    u.hostname, u.port, timeout=20)
+                conn.request("POST", (u.path or "/") + ("?" + u.query if u.query else ""), body,
+                             {"Content-Type": ctype, "Content-Length": str(len(body))})
+                r = conn.getresponse()
+                r.read()
+                conn.close()
+                code = r.status
+            except Exception as e:
+                code = f"xato: {e.__class__.__name__}"
+            st.update(last_status=code, last_at=fmt_time(now_local()))
+            if isinstance(code, int) and code < 500:
+                st["ok" if code < 400 else "fail"] += 1
+            elif tries < 5:
+                threading.Timer(5 * (tries + 1), lambda a=(tid, url, ctype, body, tries + 1): FWD_Q.put(a)).start()
+            else:
+                st["fail"] += 1
+                print(f"[uzatish] {url.split('?')[0][:40]}… yetkazilmadi: {code}", flush=True)
+
+
+def set_forward(tid, token, b):
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    url = str(b.get("url") or "").strip()
+    if url and not re.fullmatch(r"https://[\w.-]+(:\d+)?/[^\s]{0,200}", url):
+        return 400, {"error": "Manzil https://... ko'rinishida bo'lsin"}
+    fw = dict(CFG.get("forward") or {})
+    if url:
+        fw[str(tid)] = url
+    else:
+        fw.pop(str(tid), None)
+    CFG["forward"] = fw
+    save_config(CFG)
+    return 200, {"ok": True, "forward": bool(url)}
+
+
+def push_status(tid, token):
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    st = TSTATE.get(tid, {})
+    last = db.q("SELECT time, emp FROM events WHERE terminal_id=? ORDER BY time DESC LIMIT 1", (tid,))
+    return 200, {"last_push": st.get("last_poll"), "connected": st.get("connected"), "forward": bool(forward_url(tid)),
+                 "forward_state": FWD_STATE.get(tid, {}), "last_event": last[0] if last else None}
+
+
 def handle_push(tid, token, ctype, body):
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     if not rows or not rows[0]["active"] or not hmac.compare_digest(push_token(rows[0]), token):
         return 404
+    fwd = forward_url(tid)
+    if fwd and body:
+        try:
+            FWD_Q.put_nowait((tid, fwd, ctype, body, 0))
+        except queue.Full:
+            pass
     event, pic = _push_parts(ctype, body)
     st = TSTATE.setdefault(tid, {})
     st.update(connected=True, error=None, need_login=False, push=True, last_poll=fmt_time(now_local()))
@@ -2234,6 +2308,15 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path
         if p == "/api/backup/restore":
             return self.restore_upload()
+        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status)", p)
+        if m:
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                b = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 <= n <= 4096 else {}
+            except Exception:
+                return self.send(400, {"error": "Noto'g'ri so'rov"})
+            tid, tok = int(m.group(1)), m.group(2)
+            return self.send(*(set_forward(tid, tok, b) if m.group(3) == "forward" else push_status(tid, tok)))
         m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
         if m:
             try:
@@ -2402,6 +2485,7 @@ def main():
     os.makedirs(FACES, exist_ok=True)
     db = DB(os.path.join(DATA, "demo.db" if DEMO else "attendance.db"))
     TgWorker().start()
+    Forwarder().start()
     if DEMO:
         demo_setup()
         DemoGen().start()
