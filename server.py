@@ -1801,19 +1801,21 @@ def push_status(tid, token):
                  "forward_state": FWD_STATE.get(tid, {}), "last_event": last[0] if last else None}
 
 
-def handle_push(tid, token, ctype, body):
+def handle_push(tid, token, ctype, body, replay=False):
+    """replay=True — ofisdagi nusxadan yetishmagan eski o'tishni to'ldirish: uzatilmaydi, Telegram'ga yuborilmaydi."""
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     if not rows or not rows[0]["active"] or not hmac.compare_digest(push_token(rows[0]), token):
         return 404
-    fwd = forward_url(tid)
+    fwd = None if replay else forward_url(tid)
     if fwd and body:
         try:
             FWD_Q.put_nowait((tid, fwd, ctype, body, 0))
         except queue.Full:
             pass
     event, pic = _push_parts(ctype, body)
-    st = TSTATE.setdefault(tid, {})
-    st.update(connected=True, error=None, need_login=False, push=True, last_poll=fmt_time(now_local()))
+    if not replay:
+        st = TSTATE.setdefault(tid, {})
+        st.update(connected=True, error=None, need_login=False, push=True, last_poll=fmt_time(now_local()))
     if not event:
         return 200
     a = event.get("AccessControllerEvent") or {}
@@ -1833,7 +1835,8 @@ def handle_push(tid, token, ctype, body):
             s = db.q("SELECT serial FROM events WHERE id=?", (eid,))[0]["serial"]
             with open(os.path.join(PHOTOS, f"{tid}_{s}.jpg"), "wb") as f:
                 f.write(pic)
-        tg_notify([eid])
+        if not replay:
+            tg_notify([eid])
     return 200
 
 
@@ -2322,7 +2325,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n) if 0 <= n <= 8 * 1024 * 1024 else b""
-                code = handle_push(int(m.group(1)), m.group(2), self.headers.get("Content-Type") or "", body)
+                code = handle_push(int(m.group(1)), m.group(2), self.headers.get("Content-Type") or "", body,
+                                   replay=self.headers.get("X-Davomat-Replay") == "1")
             except Exception as e:
                 print(f"[push] xato: {e}", flush=True)
                 code = 200   # terminal qayta-qayta yubormasligi uchun
