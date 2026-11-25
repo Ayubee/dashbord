@@ -1567,6 +1567,7 @@ def billz_save(b):
 BZP_LOCK = threading.Lock()
 BZP_AUTH = {"token": None, "key": None}
 BZX_CACHE = {}
+BZP_PLATFORM = "7d4a4c38-dd84-4902-b744-0488b80a4c01"   # BILLZ veb-paneli har so'rovga qo'shadigan platforma ID
 
 
 def bzp_cfg():
@@ -1576,7 +1577,8 @@ def bzp_cfg():
 
 
 def _bzp_http(host, method, path, body=None, token=None, device=None, timeout=45):
-    hdr = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Davomat-dashboard"}
+    hdr = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Davomat-dashboard",
+           "platform-id": BZP_PLATFORM, "Accept-Language": "ru"}
     data = None
     if body is not None:
         data = json.dumps(body).encode("utf-8")
@@ -1625,10 +1627,12 @@ def bzp_login(c):
     if "MAX_DEVICES_LIMIT" in txt:
         raise BillzError("BILLZ: bu foydalanuvchi uchun qurilmalar chegarasi to'lgan. BILLZ'da eski qurilmalardan "
                          "birini chiqarib yuboring (yoki boshqa foydalanuvchi bilan kiring).")
-    if st in (400, 401, 403, 404, 422):
+    err = str(j.get("error") or j.get("message") or "")[:150] if isinstance(j, dict) else ""
+    if st in (400, 401, 403, 404) and ("no rows" in err or "password" in err.lower() or "invalid" in err.lower()
+                                       or st == 401):
         raise BillzError("BILLZ paneli telefon raqam yoki parolni qabul qilmadi. Panelga qanday kirsangiz, "
                          "shunday yozing.")
-    raise BillzError(f"BILLZ paneliga kirib bo'lmadi ({st}).")
+    raise BillzError(f"BILLZ paneliga kirib bo'lmadi ({st}{': ' + err if err else ''}).")
 
 
 def bzp_get(path, params):
