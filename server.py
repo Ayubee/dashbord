@@ -211,6 +211,8 @@ class DB:
             CREATE TABLE IF NOT EXISTS accounts(username TEXT PRIMARY KEY, salt TEXT, hash TEXT, created TEXT);
             CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, username TEXT, expires REAL);
             CREATE TABLE IF NOT EXISTS billz_days(date TEXT PRIMARY KEY, data TEXT, fetched REAL, final INTEGER);
+            CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, terminal_id INTEGER,
+                payload TEXT, status TEXT, result TEXT, created REAL, taken REAL);
             """)
             tcols = [r[1] for r in c.execute("PRAGMA table_info(terminals)")]
             if "active" not in tcols:
@@ -1799,15 +1801,37 @@ class CloudSync(threading.Thread):
     daemon = True
 
     def run(self):
+        n = 0
         while True:
             try:
                 if CFG.get("cloud_url") and not CLOUD and not DEMO:
                     for t in terminals(with_password=True):
-                        if t["active"]:
-                            self.sync(t)
+                        if not t["active"]:
+                            continue
+                        self.jobs(t)                 # telefondan kelgan buyruqlar — har 4 soniyada
+                        if n % 5 == 0:
+                            self.sync(t)             # o'tishlar — har ~20 soniyada
             except Exception as e:
                 print(f"[bulut] sinxron xatosi: {e}", flush=True)
-            time.sleep(20)
+            n += 1
+            time.sleep(4)
+
+    def jobs(self, t):
+        t = {**t, **db.q("SELECT mac, serial FROM terminals WHERE id=?", (t["id"],))[0]}
+        base = f"/hook/{t['id']}/{push_token(t)}"
+        st, data = self._post(base + "/jobs", b"{}", {"Content-Type": "application/json"})
+        if st != 200:
+            return
+        for j in json.loads(data or b"{}").get("jobs") or []:
+            p = {**j["payload"], "terminal_id": t["id"]}
+            try:
+                code, res = enroll_person(p) if j["kind"] == "enroll" else remove_person(p)
+            except Exception as e:
+                code, res = 500, {"error": f"Ofis kompyuterida xato: {e}"}
+            print(f"[bulut] buyruq #{j['id']} ({j['kind']} ID {p.get('emp')}): {code}", flush=True)
+            self._post(base + "/jobresult", json.dumps({"id": j["id"], "code": code, "result": res},
+                                                       ensure_ascii=False).encode("utf-8"),
+                       {"Content-Type": "application/json"})
 
     @staticmethod
     def _post(path, body, headers):
@@ -2149,6 +2173,10 @@ def enroll_person(b):
     if not edit and db.q("SELECT 1 FROM term_users WHERE terminal_id=? AND emp=?", (tid, emp)):
         return 409, {"error": f"ID {emp} {t['name']} terminalida band. Boshqa raqam tanlang."}
 
+    if CLOUD and not DEMO:
+        # bulutdan terminalga ulanib bo'lmaydi — buyruq navbatga, uni ofis kompyuteri bajaradi
+        return queue_job("enroll", tid, {**b, "emp": emp, "name": name})
+
     if not DEMO:
         dev = device_of(tid)
         if not dev or not TSTATE.get(tid, {}).get("connected"):
@@ -2182,15 +2210,81 @@ def enroll_person(b):
             return 403, {"error": "Terminal login/paroli noto'g'ri"}
         except Exception as e:
             return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
+    _enroll_finish(tid, emp, name, img, b.get("staff_id"))
+    return 200, {"ok": True, "emp": emp}
+
+
+def _enroll_finish(tid, emp, name, img, sid):
     upsert_term_user(tid, emp, name)
     if img:
         _cache_face(tid, emp, img)
-    sid = b.get("staff_id")
     if sid == "new":
         sid = db.x("INSERT INTO staff(name, code, dept, created) VALUES(?,?,?,?)", (name, "", "", fmt_time(now_local())))
     if sid not in (None, "", 0):
         db.x("INSERT OR REPLACE INTO links(terminal_id, emp, staff_id) VALUES(?,?,?)", (tid, emp, int(sid)))
-    return 200, {"ok": True, "emp": emp}
+
+
+# ----------------------------------------------------------------- bulut -> ofis buyruqlar navbati
+# Bulut terminalga ulana olmaydi. Telefondan "terminalga yoz/o'chir" buyrug'i navbatga tushadi, ofisdagi nusxa
+# uni olib terminalda bajaradi va natijani qaytaradi.
+JOB_TTL = 30 * 60
+
+
+def queue_job(kind, tid, payload):
+    jid = db.x("INSERT INTO jobs(kind, terminal_id, payload, status, created) VALUES(?,?,?,?,?)",
+               (kind, tid, json.dumps(payload, ensure_ascii=False), "pending", time.time()))
+    return 202, {"queued": True, "job": jid}
+
+
+def job_info(jid):
+    db.x("UPDATE jobs SET status='error', result=? WHERE status='pending' AND created<?",
+         (json.dumps({"error": "Ofis kompyuteri 30 daqiqa ichida javob bermadi. Kompyuter va dashboard yoqiqligini "
+                               "tekshirib, qayta urining."}, ensure_ascii=False), time.time() - JOB_TTL))
+    r = db.q("SELECT status, result, taken FROM jobs WHERE id=?", (jid,))
+    if not r:
+        return 404, {"error": "topilmadi"}
+    r = r[0]
+    return 200, {"status": r["status"], "taken": bool(r["taken"]), **json.loads(r["result"] or "{}")}
+
+
+def jobs_for_office(tid, token):
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    now = time.time()
+    out = []
+    for j in db.q("SELECT id, kind, payload, taken FROM jobs WHERE terminal_id=? AND status='pending' AND created>? "
+                  "ORDER BY id LIMIT 5", (tid, now - JOB_TTL)):
+        if j["taken"] and now - j["taken"] < 120:
+            continue
+        db.x("UPDATE jobs SET taken=? WHERE id=?", (now, j["id"]))
+        p = json.loads(j["payload"])
+        p.pop("staff_id", None)   # xodimga bog'lash bulutda qilinadi
+        out.append({"id": j["id"], "kind": j["kind"], "payload": p})
+    return 200, {"jobs": out}
+
+
+def job_result(tid, token, b):
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    j = db.q("SELECT * FROM jobs WHERE id=? AND terminal_id=?", (int(b.get("id") or 0), tid))
+    if not j or j[0]["status"] != "pending":
+        return 200, {"ok": True}
+    j = j[0]
+    p = json.loads(j["payload"])
+    res = b.get("result") or {}
+    ok = b.get("code") == 200
+    if j["kind"] == "enroll" and (ok or res.get("user_saved")):
+        img = base64.b64decode(str(p["photo"]).split(",", 1)[-1]) if p.get("photo") and ok else None
+        _enroll_finish(tid, p["emp"], p["name"], img, p.get("staff_id"))
+    if j["kind"] == "delete" and ok:
+        db.x("DELETE FROM term_users WHERE terminal_id=? AND emp=?", (tid, p["emp"]))
+        _cache_face(tid, p["emp"], None)
+    db.x("UPDATE jobs SET status=?, result=? WHERE id=?",
+         ("done" if ok else "error", json.dumps({"error": res.get("error")} if not ok else {}, ensure_ascii=False),
+          j["id"]))
+    return 200, {"ok": True}
 
 
 def remove_person(b):
@@ -2201,6 +2295,8 @@ def remove_person(b):
         return 400, {"error": "Noto'g'ri so'rov"}
     if not EMP_RE.match(emp):
         return 400, {"error": "Noto'g'ri ID"}
+    if CLOUD and not DEMO:
+        return queue_job("delete", tid, {"terminal_id": tid, "emp": emp})
     if not DEMO:
         dev = device_of(tid)
         if not dev or not TSTATE.get(tid, {}).get("connected"):
@@ -2408,6 +2504,9 @@ class Handler(BaseHTTPRequestHandler):
                 evs = [{"id": e["id"], "time": e["time"], "kind": e["kind"], "terminal": e["terminal"]}
                        for e in (g["evs"] if g else [])]
                 return self.send(200, {"events": evs})
+            m = re.fullmatch(r"/api/jobs/(\d+)", p)
+            if m:
+                return self.send(*job_info(int(m.group(1))))
             if p == "/api/backup.zip":
                 data = make_backup()
                 stamp = now_local().strftime("%Y-%m-%d_%H%M")
@@ -2443,7 +2542,7 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path
         if p == "/api/backup/restore":
             return self.restore_upload()
-        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status|users)", p)
+        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status|users|jobs|jobresult)", p)
         if m:
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -2453,7 +2552,8 @@ class Handler(BaseHTTPRequestHandler):
             tid, tok, what = int(m.group(1)), m.group(2), m.group(3)
             fn = {"forward": lambda: set_forward(tid, tok, b),
                   "status": lambda: push_status(tid, tok, office=b.get("office") is True),
-                  "users": lambda: receive_users(tid, tok, b)}[what]
+                  "users": lambda: receive_users(tid, tok, b), "jobs": lambda: jobs_for_office(tid, tok),
+                  "jobresult": lambda: job_result(tid, tok, b)}[what]
             return self.send(*fn())
         m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
         if m:

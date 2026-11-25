@@ -1337,7 +1337,8 @@ async function loadStaff(){
     const u = tu(b.dataset.tdel);
     if (!confirm(`${u.name || "ID " + u.emp} (${u.terminal}, ID ${u.emp}) terminaldan o'chirilsinmi?\n\nU endi terminaldan o'ta olmaydi. Dashboarddagi eski o'tishlari saqlanib qoladi.`)) return;
     b.disabled = true;
-    try{ await post("/api/terminals/person/delete", {terminal_id: u.terminal_id, emp: u.emp}); }catch(e){ alert(e.message); }
+    try{ const d = await post("/api/terminals/person/delete", {terminal_id: u.terminal_id, emp: u.emp}); b.textContent = "Ofis kompyuteri bajaryapti…"; await waitJob(d); }
+    catch(e){ alert(e.message); }
     loadStaff(); pollState();
   });
   $("matchBody").querySelectorAll("select").forEach(s => s.onchange = async () => {
@@ -1464,13 +1465,28 @@ $("enShot").onclick = () => {
   const url = toJpeg(v, true); enrStopCam(); enrSetPhoto(url);
 };
 $("mEnroll").addEventListener("click", e => { if (e.target.closest("[data-close]") || e.target === $("mEnroll")) enrStopCam(); });
+// server (bulut) terminalga o'zi ulana olmaydi — buyruqni ofis kompyuteri bajaradi; natijasini kutamiz
+async function waitJob(d, onWait){
+  if (!d || !d.queued) return;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 75000){
+    await new Promise(r => setTimeout(r, 2000));
+    const s = await j(`/api/jobs/${d.job}`);
+    if (s.status === "done") return;
+    if (s.status === "error") throw new Error(s.error || "Terminal buyruqni bajarmadi");
+    onWait && onWait(s.taken);
+  }
+  throw new Error("Ofis kompyuteri hozir javob bermayapti. Buyruq navbatda qoldi — kompyuter va dashboard yoqilganda o'zi bajariladi (30 daqiqagacha).");
+}
 $("enrForm").onsubmit = async ev => {
   ev.preventDefault(); showErr("enErr", "");
   const btn = $("enBtn"), label = btn.textContent;
   btn.disabled = true; btn.textContent = "Terminalga yozilmoqda…";
   try{
-    await post("/api/terminals/person", {terminal_id: +$("enTerm").value, emp: $("enEmp").value.trim(), name: $("enName").value.trim(),
+    const d = await post("/api/terminals/person", {terminal_id: +$("enTerm").value, emp: $("enEmp").value.trim(), name: $("enName").value.trim(),
       photo: enrPhoto, edit: !!enrEdit, staff_id: $("enStaffF").hidden ? null : ($("enStaff").value === "new" ? "new" : ($("enStaff").value ? +$("enStaff").value : null))});
+    btn.textContent = "Ofis kompyuteriga yuborildi…";
+    await waitJob(d, taken => btn.textContent = taken ? "Ofis kompyuteri terminalga yozmoqda…" : "Ofis kompyuteri kutilmoqda…");
     enrStopCam(); closeModal($("mEnroll")); await loadStaff(); pollState();
   }catch(e){ showErr("enErr", e.message); loadStaff(); }
   finally{ btn.disabled = false; btn.textContent = label; }
