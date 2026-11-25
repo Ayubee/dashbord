@@ -254,6 +254,21 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 /* savdo (BILLZ) */
 .sg2{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
 .sg2>.col{display:flex;flex-direction:column;gap:14px}
+.sg2.top{align-items:start}
+:root{--mix1:#3987e5;--mix2:#d95926;--mix3:#199e70;--mix4:#c98500;--mix5:#d55181;--mix0:#5d6068}
+:root[data-theme="light"]{--mix1:#2a78d6;--mix2:#eb6834;--mix3:#1baf7a;--mix4:#eda100;--mix5:#e87ba4;--mix0:#b9bdc6}
+.mixbar{display:flex;gap:2px;height:44px;margin:4px 0 16px}
+.mixseg{min-width:3px;border-radius:4px;display:grid;place-items:center;cursor:pointer;transition:filter .15s}
+.mixseg:hover{filter:brightness(1.12)}
+.mixseg span{font-size:12px;font-weight:600;color:#0b0b0b;font-variant-numeric:tabular-nums}
+.mixleg{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 22px}
+.mixleg li{display:grid;grid-template-columns:10px minmax(0,1fr) auto auto;gap:8px;align-items:center;font-size:13px}
+.mixleg li[data-fund]{cursor:pointer}
+.mixleg i{width:10px;height:10px;border-radius:3px}
+.mixleg span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mixleg b{font-weight:600;font-variant-numeric:tabular-nums}
+.mixleg small{color:var(--muted);font-variant-numeric:tabular-nums;min-width:42px;text-align:right}
+@media (max-width:760px){ .dsk-only{display:none!important} } /* diagrammalar faqat planshet va kompyuterda */
 .pad{padding:18px 20px}
 .ct{margin:0 0 12px;font-size:13px;font-weight:500;color:var(--muted);display:flex;align-items:center;gap:8px}
 .ct b{margin-left:auto;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
@@ -1365,6 +1380,13 @@ function renderExp(){
   const bars = series.map((p, i) => `<div class="b" title="${ddmm(p.t)} — ${sum(p.v)} so'm"><i style="height:${p.v / max * 100}%;background:var(--orange)"></i><small>${i % step ? "" : p.t.slice(8,10) + "." + p.t.slice(5,7)}</small></div>`).join("");
   const flist = `<ul class="hl">${funds.map(r => `<li data-fund="${esc(r.name)}" style="cursor:pointer" title="${esc(r.name)} — ${r.n} ta yozuv"><span>${esc(r.name)}</span><b>${short(r.total)}</b><div class="tr"><i style="width:${tot ? Math.max(1, r.total / tot * 100) : 0}%;background:var(--orange)"></i></div></li>`).join("") || '<li class="muted">—</li>'}</ul>`;
   const big = funds[0];
+  const top5 = funds.slice(0, 5), rest = funds.slice(5).reduce((a, r) => a + r.total, 0);
+  const parts = top5.map((r, i) => ({name: r.name, total: r.total, c: `var(--mix${i + 1})`, fund: r.name}))
+    .concat(rest > 0 ? [{name: `Boshqalar (${funds.length - 5} ta fond)`, total: rest, c: "var(--mix0)"}] : []);
+  const pct = v => tot ? v / tot * 100 : 0;
+  const mix = !tot ? '<div class="muted">Bu davrda rasxod yo\'q</div>' : `
+    <div class="mixbar">${parts.map(p => `<div class="mixseg" ${p.fund ? `data-fund="${esc(p.fund)}"` : ""} style="flex:${Math.max(p.total, tot * .004)} 1 0;background:${p.c}" title="${esc(p.name)} — ${sum(p.total)} so'm (${pct(p.total).toFixed(1)}%)">${pct(p.total) >= 7 ? `<span>${Math.round(pct(p.total))}%</span>` : ""}</div>`).join("")}</div>
+    <ul class="mixleg">${parts.map(p => `<li ${p.fund ? `data-fund="${esc(p.fund)}"` : ""}><i style="background:${p.c}"></i><span title="${esc(p.name)}">${esc(p.name)}</span><b>${short(p.total)}</b><small>${pct(p.total).toFixed(1)}%</small></li>`).join("")}</ul>`;
   box.innerHTML = `
     <div class="stats">
       <div class="card stat" style="color:var(--orange)"><div class="l">Jami rasxod · ${esc(range)}</div><div class="v sm">${short(tot)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
@@ -1372,9 +1394,12 @@ function renderExp(){
       <div class="card stat" style="color:var(--lime)"><div class="l">${totUsd ? "Dollarda" : "Kuniga o'rtacha"}</div><div class="v sm">${totUsd ? "$" + qty(totUsd) : short(tot / days)}${totUsd ? "" : "<small>so'm</small>"}</div><div class="bar"><b style="width:100%"></b></div></div>
       <div class="card stat" style="color:var(--red)"><div class="l">Eng katta fond</div><div class="v sm" style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(big ? big.name : "")}">${big ? esc(big.name) : "—"}</div><div class="sub" style="margin-top:6px">${big ? short(big.total) + " so'm · " + Math.round(big.total / (tot || 1) * 100) + "%" : ""}</div></div>
     </div>
-    <div class="sg2">
-      <div class="card pad">${days > 1 ? `<div class="ct">Kunlar bo'yicha rasxod<b>${sum(tot)} so'm</b></div><div class="chart">${bars}</div>`
-        : `<div class="ct">Statyalar<b>${sum(tot)} so'm</b></div>${hlist(arts.slice(0, 12).map(a => ({name: a.name.split(SEP)[1] + " · " + a.name.split(SEP)[0], total: a.total})), tot)}`}</div>
+    <div class="sg2 top">
+      <div class="col">
+        ${days > 1 ? `<div class="card pad"><div class="ct">Kunlar bo'yicha rasxod<b>${sum(tot)} so'm</b></div><div class="chart">${bars}</div></div>` : ""}
+        <div class="card pad dsk-only"><div class="ct">Rasxod tarkibi — fondlar ulushi<b>${sum(tot)} so'm</b></div>${mix}</div>
+        <div class="card pad dsk-only"><div class="ct">Eng katta statyalar (top 10)</div>${hlist(arts.slice(0, 10).map(a => ({name: a.name.split(SEP)[1] + " · " + a.name.split(SEP)[0], total: a.total})), arts[0] ? arts[0].total : 0)}</div>
+      </div>
       <div class="col">
         <div class="card pad"><div class="ct">Fondlar${fund ? ` <a class="link" id="exAllF" style="margin-left:6px">hammasi</a>` : ""}</div>${flist}</div>
         <div class="card pad"><div class="ct">To'lov turi</div>${hlist(pays, tot)}</div>
@@ -1392,7 +1417,7 @@ function renderExp(){
         <td class="num strong">${c.k === "usd" ? "$" + qty(r.amount) : sum(r.amount)}<small>${c.k === "usd" ? "dollar" : esc(c.t)}</small></td><td style="white-space:normal;max-width:420px">${esc(r.comment)}</td></tr>`; }).join("")
         || `<tr class="empty"><td colspan="5">${all.length ? "Filtrga mos rasxod yo'q" : "Bu davrda rasxod yo'q"}</td></tr>`}
     </tbody></table></div></div>`;
-  box.querySelectorAll("li[data-fund]").forEach(li => li.onclick = () => { $("exFund").value = li.dataset.fund; $("exArt").value = ""; renderExp(); });
+  box.querySelectorAll("[data-fund]").forEach(li => li.onclick = () => { $("exFund").value = li.dataset.fund; $("exArt").value = ""; renderExp(); });
   const af = $("exAllF"); if (af) af.onclick = () => { $("exFund").value = ""; $("exArt").value = ""; renderExp(); };
 }
 
