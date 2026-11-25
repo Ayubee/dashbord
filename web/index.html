@@ -560,7 +560,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
   <div class="frame glass">
     <div class="top">
       <h1 id="pageTitle">Davomat (Face ID)</h1>
-      <label class="chip search" id="searchChip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" type="search" name="dash-search" readonly autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Qidirish..."><button type="button" class="qclr" id="qClr" title="Qidiruvni tozalash" hidden>×</button></label>
+      <label class="chip search" id="searchChip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" type="search" name="dash-search" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Qidirish..."><button type="button" class="qclr" id="qClr" title="Qidiruvni tozalash" hidden>×</button></label>
       <span class="chip" id="todayTxt"></span>
       <div class="avatar" id="meAv"></div>
     </div>
@@ -1216,15 +1216,13 @@ $("refresh").onclick = () => { pollState(); load(); };
 const reQ = () => view === "sales" ? renderSales() : view === "exp" ? renderExp() : mode === "day" ? renderDay() : renderMonth();
 $("q").oninput = () => { $("qClr").hidden = !$("q").value; reQ(); };
 $("qClr").onclick = () => { $("q").value = ""; $("qClr").hidden = true; qTyped = false; reQ(); };
-// brauzer saqlangan loginni (telefon, ssilka...) qidiruvga yozib qo'ymasin: maydon bosilgunicha faqat-o'qish,
-// foydalanuvchi o'zi yozmagan har qanday matn tozalanadi
+// qidiruv har doim bo'sh ochiladi: brauzer saqlangan loginni (telefon, ssilka...) yozib qo'ysa — tozalanadi.
+// Foydalanuvchi o'zi yozgan matnga tegilmaydi.
 var qTyped = false;
-const qOpen = () => $("q").removeAttribute("readonly");
-$("q").addEventListener("pointerdown", qOpen);
-$("q").addEventListener("touchstart", qOpen, {passive: true});
-$("q").addEventListener("focus", qOpen);
-$("q").addEventListener("blur", () => { if (!$("q").value){ $("q").setAttribute("readonly", ""); qTyped = false; } });
+$("q").value = "";
 $("q").addEventListener("keydown", () => { qTyped = true; });
+$("q").addEventListener("input", e => { if (e.inputType && e.inputType !== "insertReplacementText") qTyped = true; });   // telefon klaviaturasi / ovoz bilan yozish
+$("q").addEventListener("blur", () => { if (!$("q").value) qTyped = false; });
 $("q").addEventListener("paste", () => { qTyped = true; });
 function unAutofill(){
   const q = $("q");
