@@ -2,7 +2,7 @@
 <html lang="uz">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Davomat (Face ID)</title>
 <script>
   // mavzu: saqlangan tanlov, bo'lmasa tizim sozlamasi (sahifa miltillamasligi uchun boshida)
@@ -29,6 +29,7 @@
   --input:rgba(0,0,0,.28); --input-f:rgba(0,0,0,.4); --opt:#1c1d21; --scheme:dark;
   --btn-bg:#ffffff; --btn-fg:#111215;
   --side:#0a0a0a;
+  --frame-tint:rgba(255,255,255,.058); --card-tint:rgba(255,255,255,.05); /* ramka va karta shishasining o'rtacha rangi (yopishqoq ustun uchun) */
   --teal:#5fd4c4; --lime:#d6f25c; --green:#8fe38a; --orange:#ffb35e; --red:#ff7b6e;
   --blur:blur(28px) saturate(160%);
   --shadow:0 10px 40px rgba(0,0,0,.30), inset 0 1px 0 var(--hi);
@@ -48,6 +49,7 @@
   --row:rgba(255,255,255,.62); --row-h:rgba(255,255,255,.95); --row-a:rgba(255,255,255,.32); --we:rgba(20,25,40,.04);
   --input:rgba(255,255,255,.75); --input-f:#fff; --opt:#fff; --scheme:light;
   --btn-bg:#15171c; --btn-fg:#ffffff;
+  --frame-tint:rgba(255,255,255,.57); --card-tint:rgba(255,255,255,.65);
   --teal:#0e9483; --lime:#6f8f00; --green:#25904a; --orange:#cf7414; --red:#d23f32;
   --shadow:0 10px 36px rgba(30,40,70,.10), inset 0 1px 0 var(--hi);
 }
@@ -288,17 +290,184 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .shot img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;background:var(--g2)}
 .shot div{padding:8px 10px;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap}
 
-@media (max-width:1100px){ .stats{grid-template-columns:repeat(2,1fr)} .sgrid{grid-template-columns:1fr} .snav{flex-direction:row;overflow-x:auto} }
-@media (max-width:760px){
-  .shell{flex-direction:column;padding:10px;gap:10px}
-  .side{position:sticky;top:10px;height:auto;width:auto;flex-direction:row;padding:8px 12px;border-radius:22px;gap:4px;overflow-x:auto}
-  .side .logo{margin:0 6px 0 0;width:38px;height:38px}
-  .nav .tip{display:none}
-  .frame{padding:18px 14px;border-radius:26px}
-  .top h1{font-size:26px;width:100%}
-  .search{min-width:0;flex:1}
-  .row2,.row3{grid-template-columns:1fr}
+/* ============ moslashuvchan ko'rinish: planshet va telefon (>=1200px — kompyuter, o'zgarmaydi) */
+@media (max-width:1199px){
+  .shell{gap:14px;padding:14px max(14px,env(safe-area-inset-right)) 14px max(14px,env(safe-area-inset-left))}
+  .side{top:14px;height:calc(100vh - 28px);width:72px}
+  .frame{padding:22px 22px 26px;border-radius:30px}
+  /* barmoq bilan bosish uchun kamida 44px */
+  .ibtn{width:44px;height:44px}
+  .dinput,.sel{min-height:44px}
+  .seg button{min-height:40px}
+  .link{min-height:44px}
+  .btn{min-height:44px} .btn.sm{min-height:40px}
+  .mhead .x{width:44px;height:44px}
+  .snav button{min-height:44px}
+  /* keng jadvallar o'z ichida suriladi, birinchi ustun joyida qoladi */
+  .tablewrap{-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  /* yopishqoq ustun shaffof bo'lmasligi kerak: ostidagi qatlamlarni (sahifa foni + ramka + karta + qator) qayta chizamiz */
+  .tablewrap th:first-child,.tablewrap td:first-child{position:sticky;left:0;z-index:1;--cell:transparent;
+    background:linear-gradient(var(--cell),var(--cell)),linear-gradient(var(--card-tint),var(--card-tint)),linear-gradient(var(--frame-tint),var(--frame-tint)),var(--bgfx),var(--bg);
+    background-attachment:scroll,scroll,scroll,fixed,fixed}
+  .tablewrap th:first-child{z-index:2}
+  .tablewrap td:first-child{--cell:var(--row)}
+  .tablewrap tr.row:hover td:first-child{--cell:var(--row-h)}
+  .tablewrap tr.absent td:first-child{--cell:var(--row-a)}
+  .tablewrap tr.empty td:first-child{position:static}
+  .tablewrap td .chips{flex-wrap:nowrap}
 }
+@media (max-width:1199px) and (max-height:560px){ .side{overflow-y:auto} .side .logo{margin-bottom:8px} }
+@media (max-width:1100px){
+  .stats{grid-template-columns:repeat(2,1fr)} .sgrid{grid-template-columns:minmax(0,1fr)}
+  .snav{flex-direction:row;overflow-x:auto;scrollbar-width:none}
+  .snav::-webkit-scrollbar{display:none}
+  .snav button{flex:none;white-space:nowrap}
+}
+@media (max-width:760px){
+  /* karkas: chap panel — pastdagi tab-bar, ramka — butun ekran (16px chet) */
+  :root,:root[data-theme="light"]{--frame-tint:transparent} /* telefonda ramka shaffof */
+  .shell{display:block;padding:0}
+  .frame{background:none;border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;border-radius:0;
+    padding:calc(14px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+  .side{position:fixed;top:auto;left:max(10px,env(safe-area-inset-left));right:max(10px,env(safe-area-inset-right));bottom:max(10px,env(safe-area-inset-bottom));
+    height:auto;width:auto;flex-direction:row;justify-content:space-between;padding:6px;gap:2px;border-radius:24px;overflow:visible}
+  .side .logo,.side .sp{display:none}
+  .nav{flex:1 1 0;min-width:44px;max-width:64px;height:50px;border-radius:18px}
+  .nav svg{width:22px;height:22px}
+  .nav .tip{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;opacity:0}
+  .nav .badge-n{top:5px;right:calc(50% - 20px)}
+  /* sarlavha */
+  .top{gap:10px;margin-bottom:16px}
+  .top h1{font-size:26px;width:auto;flex:1 1 calc(100% - 52px);min-width:0;order:0}
+  .avatar{order:1}
+  .search{order:2;min-width:0;flex:1 1 120px;min-height:44px}
+  #todayTxt{order:3;font-size:12.5px;min-height:44px}
+  /* iOS kattalashtirmasligi uchun kiritish maydonlari >=16px */
+  input,select,textarea,.dinput,.sel,.search input{font-size:16px}
+  .field input,.field select,.inp{padding:12px 14px}
+  .banner{align-items:flex-start;padding:12px 14px}
+  /* asboblar paneli */
+  .toolbar{gap:8px}
+  .toolbar .seg{display:flex;width:100%}
+  .toolbar .seg button{flex:1 1 0;padding:7px 6px;white-space:nowrap}
+  .toolbar .dinput{flex:1 1 140px;min-width:140px}
+  #tfilter{flex:1 1 160px;min-width:0}
+  .toolbar .sp{display:none}
+  #updTxt,#sUpd{flex:1 1 auto;font-size:12.5px}
+  /* kartalar: 2 tadan */
+  .cards{grid-template-columns:minmax(0,1fr);gap:10px;margin-bottom:10px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px;margin-bottom:10px}
+  .stats>.stat:last-child:nth-child(odd){grid-column:1/-1}
+  .card{border-radius:20px}
+  .stat{padding:14px}
+  .stat .v{font-size:24px;overflow-wrap:anywhere}
+  .stat .v.sm{font-size:20px}
+  .stat .l{font-size:12px}
+  .tcard,.last{padding:14px}
+  .tcard .k{flex-wrap:wrap}
+  .last .t{font-size:17px}
+  /* jadvallar */
+  .tablecard{padding:6px 8px 8px}
+  th{padding:10px 10px 8px} td{padding:9px 10px}
+  .tabel th:first-child,.tabel td:first-child{min-width:132px;max-width:132px;padding-left:10px}
+  .tabel .who .av{display:none}
+  .tabel .who>div{min-width:0}
+  .tabel .who b,.tabel .who small{overflow:hidden;text-overflow:ellipsis}
+  #salesBody td:nth-child(2):not(.num){white-space:normal;min-width:130px}
+  #salesBody .who b{white-space:normal;min-width:110px}
+  /* kunlik ro'yxat, xodimlar va moslash — telefonda kartochkalar */
+  #tableWrap table:not(.tabel),.stk-staff,.stk-match{display:block}
+  #tableWrap table:not(.tabel) thead,.stk-staff thead,.stk-match thead{display:none}
+  #tableWrap table:not(.tabel) tbody,.stk-staff tbody,.stk-match tbody{display:flex;flex-direction:column;gap:8px;padding:2px 0}
+  #tableWrap table:not(.tabel) tr,.stk-staff tr,.stk-match tr{display:grid;gap:10px;align-items:center;padding:12px 14px;border-radius:18px;background:var(--row)}
+  #tableWrap table:not(.tabel) tr.absent{background:var(--row-a)}
+  #tableWrap table:not(.tabel) .chips,.stk-staff .chips{flex-wrap:wrap}
+  #tableWrap table:not(.tabel) td,.stk-staff td,.stk-match td{display:block;position:static;padding:0;background:none!important;border-radius:0!important;white-space:normal;min-width:0}
+  #tableWrap table:not(.tabel) tr.empty,.stk-staff tr.empty,.stk-match tr.empty{display:block;background:var(--row-a)}
+  #tableWrap table:not(.tabel) tr.empty td,.stk-staff tr.empty td,.stk-match tr.empty td{padding:22px 8px;text-align:center}
+  #tableWrap table:not(.tabel) td::before,.stk-staff td::before,.stk-match td::before{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-bottom:2px}
+  /* kunlik: xodim+ko'z | holat | keldi ketdi ishladi o'tish | bo'lim terminal */
+  #tableWrap table:not(.tabel) tr{grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:start}
+  #tableWrap table:not(.tabel) td:nth-child(1),#tableWrap table:not(.tabel) td:nth-child(9){align-self:center}
+  #tableWrap table:not(.tabel) td:nth-child(1){grid-column:1/4;grid-row:1}
+  #tableWrap table:not(.tabel) td:nth-child(9){grid-column:4;grid-row:1}
+  #tableWrap table:not(.tabel) td:nth-child(6){grid-column:1/-1;grid-row:2}
+  #tableWrap table:not(.tabel) td:nth-child(6):empty{display:none}
+  #tableWrap table:not(.tabel) td:nth-child(3){grid-column:1;grid-row:3}
+  #tableWrap table:not(.tabel) td:nth-child(4){grid-column:2;grid-row:3}
+  #tableWrap table:not(.tabel) td:nth-child(5){grid-column:3;grid-row:3}
+  #tableWrap table:not(.tabel) td:nth-child(8){grid-column:4;grid-row:3;text-align:right}
+  #tableWrap table:not(.tabel) td:nth-child(2){grid-column:1/3;grid-row:4}
+  #tableWrap table:not(.tabel) td:nth-child(7){grid-column:3/-1;grid-row:4}
+  #tableWrap table:not(.tabel) td:nth-child(3)::before{content:"Keldi"}
+  #tableWrap table:not(.tabel) td:nth-child(4)::before{content:"Ketdi"}
+  #tableWrap table:not(.tabel) td:nth-child(5)::before{content:"Ishladi"}
+  #tableWrap table:not(.tabel) td:nth-child(8)::before{content:"O'tish"}
+  #tableWrap table:not(.tabel) td:nth-child(2)::before{content:"Bo'lim"}
+  #tableWrap table:not(.tabel) td:nth-child(7)::before{content:"Terminal"}
+  #tableWrap table:not(.tabel) tr.empty td::before{content:none}
+  #tableWrap table:not(.tabel) .eye{width:44px;height:44px;display:grid;place-items:center}
+  /* xodimlar: xodim+o'chirish | tabel raqami, bo'lim | terminallar */
+  .stk-staff tr{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
+  .stk-staff td:nth-child(1){grid-column:1/3;grid-row:1}
+  .stk-staff td:nth-child(5){grid-column:3;grid-row:1}
+  .stk-staff td:nth-child(2){grid-column:1;grid-row:2}
+  .stk-staff td:nth-child(3){grid-column:2/-1;grid-row:2}
+  .stk-staff td:nth-child(4){grid-column:1/-1;grid-row:3}
+  .stk-staff td:nth-child(2)::before{content:"Tabel raqami"}
+  .stk-staff td:nth-child(3)::before{content:"Bo'lim"}
+  .stk-staff tr.empty td::before{content:none}
+  /* moslash: terminal, ID, ism | xodim tanlash */
+  .stk-match tr{grid-template-columns:auto auto minmax(0,1fr)}
+  .stk-match td:nth-child(2)::before{content:"ID";display:inline;margin:0 4px 0 0}
+  .stk-match td:nth-child(4){grid-column:1/-1}
+  .stk-match td:nth-child(4) select{width:100%;min-width:0!important}
+  .stk-match td:nth-child(4) .pill{margin:8px 0 0!important}
+  .stk-match td:nth-child(5){grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;text-align:left!important;white-space:normal!important}
+  .stk-match td:nth-child(5):empty{display:none}
+  .stk-match td:nth-child(5) .btn{flex:1}
+  /* sozlamalar: bo'limlar — gorizontal chiplar qatori */
+  .sgrid{gap:12px}
+  .snav{background:none;border:0;box-shadow:none;border-radius:0;padding:2px 16px;margin:0 -16px;gap:8px;scroll-padding:0 16px}
+  .snav button{padding:10px 14px;border-radius:999px;background:var(--g1);border:1px solid var(--line)}
+  .snav button.on{border-color:var(--line2)}
+  .snav .n{margin-left:4px}
+  .spane{padding:18px 16px 16px}
+  .spane h2{font-size:19px}
+  .phead .btn{width:100%}
+  .tlist{grid-template-columns:minmax(0,1fr)}
+  .titem{padding:16px}
+  .titem .acts .btn{flex:1}
+  .ulist li{flex-wrap:wrap}
+  .ulist li b{min-width:0;overflow-wrap:anywhere}
+  .tokrow{flex-wrap:wrap}
+  .tokrow .field{min-width:0}
+  .tokrow .btn{flex:none}
+  .check{min-height:44px}
+  #tgManual{flex:1 1 160px;min-width:0}
+  .tgprev{max-width:none}
+  .row2,.row3{grid-template-columns:1fr;gap:0 10px}
+  .row3 .field{grid-column:auto!important}
+  /* savdo */
+  .sg2{gap:10px;margin-bottom:10px}
+  .pad{padding:16px}
+  .chart{height:170px;gap:3px}
+  .secttl{margin:16px 2px 8px}
+  /* modallar — pastdan chiqadigan varaq */
+  .modal{align-items:flex-end;padding:0}
+  .mbox,.mbox.sm{max-width:none;max-height:calc(100vh - 24px);max-height:calc(100dvh - 12px - env(safe-area-inset-top));
+    border-radius:26px 26px 0 0;border-bottom:0;padding:0 max(16px,env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+    overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+  .modal.open .mbox{animation:sheet .26s cubic-bezier(.2,.8,.2,1)}
+  .mhead{position:sticky;top:0;z-index:3;margin:0 -16px 14px;padding:16px 16px 12px;background:var(--modal-bg);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border-bottom:1px solid var(--line)}
+  .mhead h3{font-size:18px}
+  .mhead>div:not(.av){min-width:0}
+  .shots{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* kirish sahifasi */
+  .auth form{padding:28px 22px;border-radius:28px}
+}
+@keyframes sheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
 </style>
 </head>
 <body>
@@ -418,7 +587,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
           <div data-pane="staff" hidden>
             <div class="phead"><div><h2>Xodimlar</h2><p class="desc">Xodimni qo'shing va har bir terminaldagi ID siga bog'lang. Bir xodim bir nechta terminalda bo'lishi mumkin — hammasi bitta odam bo'lib hisoblanadi.</p></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" id="addEnroll" type="button">📷 Terminalga Face ID qo'shish</button><button class="btn" id="addStaff">+ Xodim qo'shish</button></div></div>
-            <div class="tablewrap"><table><thead><tr><th>Xodim</th><th>Tabel raqami</th><th>Bo'lim</th><th>Terminallar</th><th></th></tr></thead><tbody id="staffBody"></tbody></table></div>
+            <div class="tablewrap"><table class="stk-staff"><thead><tr><th>Xodim</th><th>Tabel raqami</th><th>Bo'lim</th><th>Terminallar</th><th></th></tr></thead><tbody id="staffBody"></tbody></table></div>
           </div>
           <!-- moslash -->
           <div data-pane="match" hidden>
@@ -428,7 +597,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               <label class="check"><input type="checkbox" id="onlyUnl"> Faqat bog'lanmaganlar</label>
               <span class="muted" id="autoMsg"></span>
             </div>
-            <div class="tablewrap"><table><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th><th></th></tr></thead><tbody id="matchBody"></tbody></table></div>
+            <div class="tablewrap"><table class="stk-match"><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th><th></th></tr></thead><tbody id="matchBody"></tbody></table></div>
           </div>
           <!-- zaxira -->
           <div data-pane="backup" hidden>
@@ -1053,7 +1222,7 @@ function openTab(t){
   curTab = t;
   $$(".snav button").forEach(b => b.classList.toggle("on", b.dataset.st === t));
   $$("[data-pane]").forEach(p => p.hidden = p.dataset.pane !== t);
-  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, accounts: loadUsers, general: loadGeneral})[t]();
+  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, accounts: loadUsers, general: loadGeneral, backup: () => {}})[t]?.();
 }
 
 /* --- terminallar */
