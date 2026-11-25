@@ -560,7 +560,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
   <div class="frame glass">
     <div class="top">
       <h1 id="pageTitle">Davomat (Face ID)</h1>
-      <label class="chip search" id="searchChip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" type="search" name="dash-search" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Qidirish..."><button type="button" class="qclr" id="qClr" title="Qidiruvni tozalash" hidden>×</button></label>
+      <label class="chip search" id="searchChip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" type="search" name="dash-search" readonly autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Qidirish..."><button type="button" class="qclr" id="qClr" title="Qidiruvni tozalash" hidden>×</button></label>
       <span class="chip" id="todayTxt"></span>
       <div class="avatar" id="meAv"></div>
     </div>
@@ -1061,6 +1061,7 @@ $$(".side .nav[data-nav]").forEach(b => b.onclick = () => {
   showDash(n);
 });
 function showDash(m){
+  unAutofill();
   view = "dash"; $("viewDash").hidden = false; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("viewExp").hidden = true; $("searchChip").hidden = false;
   $("pageTitle").textContent = "Davomat (Face ID)";
   if (m) setMode(m); else setNav(mode);
@@ -1214,15 +1215,24 @@ $("tfilter").onchange = () => { tid = $("tfilter").value; load(); };
 $("refresh").onclick = () => { pollState(); load(); };
 const reQ = () => view === "sales" ? renderSales() : view === "exp" ? renderExp() : mode === "day" ? renderDay() : renderMonth();
 $("q").oninput = () => { $("qClr").hidden = !$("q").value; reQ(); };
-$("qClr").onclick = () => { $("q").value = ""; $("qClr").hidden = true; reQ(); };
-// brauzer saqlangan login (masalan telefon raqam) ni qidiruvga avtomatik yozib qo'ysa — tozalaymiz
+$("qClr").onclick = () => { $("q").value = ""; $("qClr").hidden = true; qTyped = false; reQ(); };
+// brauzer saqlangan loginni (telefon, ssilka...) qidiruvga yozib qo'ymasin: maydon bosilgunicha faqat-o'qish,
+// foydalanuvchi o'zi yozmagan har qanday matn tozalanadi
+var qTyped = false;
+const qOpen = () => $("q").removeAttribute("readonly");
+$("q").addEventListener("pointerdown", qOpen);
+$("q").addEventListener("touchstart", qOpen, {passive: true});
+$("q").addEventListener("focus", qOpen);
+$("q").addEventListener("blur", () => { if (!$("q").value){ $("q").setAttribute("readonly", ""); qTyped = false; } });
+$("q").addEventListener("keydown", () => { qTyped = true; });
+$("q").addEventListener("paste", () => { qTyped = true; });
 function unAutofill(){
-  const q = $("q"); let af = false;
-  try{ af = q.matches(":autofill"); }catch(e){ try{ af = q.matches(":-webkit-autofill"); }catch(e2){} }
-  if (af || /^\+?\d{9,13}$/.test(q.value.trim())){ q.value = ""; $("qClr").hidden = true; return true; }
+  const q = $("q");
+  if (q.value && !qTyped){ q.value = ""; $("qClr").hidden = true; return true; }
   return false;
 }
-for (const t of [300, 1200, 3000]) setTimeout(() => { if (unAutofill()) reQ(); }, t);
+for (const t of [300, 1200, 3000, 8000]) setTimeout(() => { if (unAutofill()) reQ(); }, t);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && unAutofill()) reQ(); });
 function qNote(box){
   const q = $("q").value.trim(); if (!q) return;
   const n = document.createElement("div"); n.className = "banner"; n.style.marginBottom = "12px";
@@ -1263,6 +1273,7 @@ const short = n => { n = n || 0; const a = Math.abs(n);
   return a >= 1e9 ? (n/1e9).toFixed(2).replace(/\.?0+$/, "") + " mlrd" : a >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/, "") + " mln" : sum(n); };
 const qty = n => (Math.round((n || 0) * 100) / 100).toLocaleString("ru-RU").replace(/[ ,]/g, " ");
 function showSales(){
+  unAutofill();
   view = "sales"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = false; $("viewExp").hidden = true; $("searchChip").hidden = false;
   $("pageTitle").textContent = "Savdo (BILLZ)"; setNav("sales");
   if (!$("sFrom").value) setPer(per, true);
@@ -1496,6 +1507,7 @@ const curOf = c => { c = c || "";
   return {k: c, t: c}; };
 const ddmm = d => d ? d.slice(8,10) + "." + d.slice(5,7) + "." + d.slice(0,4) : "";
 function showExp(){
+  unAutofill();
   view = "exp"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("viewExp").hidden = false; $("searchChip").hidden = false;
   $("pageTitle").textContent = "Rasxodlar"; setNav("exp");
   if (!$("exFrom").value) setExPer(exPer || "month", true);
