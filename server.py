@@ -13,6 +13,7 @@ import base64
 import calendar
 import csv
 import hashlib
+import hmac
 import html
 import http.client
 import io
@@ -404,6 +405,11 @@ class Poller(threading.Thread):
 def start_poller(t):
     stop_poller(t["id"])
     if not t.get("active", 1):
+        return
+    if CLOUD and not DEMO:
+        # Bulutdan ofis tarmog'idagi terminalga ulanib bo'lmaydi — terminal o'zi hodisa yuboradi (/hook/...)
+        TSTATE[t["id"]] = {"connected": False, "need_login": False, "last_poll": None, "device": None, "push": True,
+                           "error": "Terminaldan hali signal kelmadi (terminal internetga ulanganini tekshiring)"}
         return
     if DEMO:
         TSTATE[t["id"]] = {"connected": True, "error": None, "need_login": False,
@@ -929,6 +935,10 @@ def tg_deliver(c, info, photo):
 
 def tg_notify(ids):
     c = tg_cfg()
+    # Terminal hodisalarni bulut serveriga ham yuborayotgan bo'lsa, Telegram'ni bulut yuboradi —
+    # ofisdagi nusxa ikkinchi marta yubormaydi.
+    if CFG.get("cloud_url") and not CLOUD:
+        return
     if c["enabled"] and c["token"] and c["chats"]:
         for i in ids:
             TG_Q.put(i)
@@ -1681,6 +1691,78 @@ def discover_info():
     return {"devices": out}
 
 
+# ----------------------------------------------------------------- terminal -> bulut (HTTP push)
+# Terminal har bir o'tishni (rasmi bilan) internet orqali to'g'ridan-to'g'ri shu serverga yuboradi —
+# ofis kompyuteri o'chiq bo'lsa ham. Manzil: /hook/<terminal_id>/<token>. Token terminal parolidan
+# hisoblanadi (HMAC), shuning uchun alohida maxfiy kalit saqlash/kiritish shart emas.
+def push_token(t):
+    key = f"{t.get('password') or ''}|{t.get('serial') or ''}".encode("utf-8")
+    return hmac.new(key, f"davomat-push:{t['id']}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _push_parts(ctype, body):
+    """multipart / JSON / XML so'rovdan (hodisa-dict, rasm-bytes) ajratish."""
+    from email.parser import BytesParser
+    from email.policy import default as email_default
+    event, pic = None, None
+    parts = []
+    if "multipart/" in ctype.lower():
+        msg = BytesParser(policy=email_default).parsebytes(
+            f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body)
+        for p in msg.iter_parts():
+            parts.append((p.get_content_type(), p.get_param("name", header="content-disposition") or "",
+                          p.get_payload(decode=True) or b""))
+    else:
+        parts.append((ctype, "", body))
+    for ct, name, data in parts:
+        if data[:2] == b"\xff\xd8" or ct.startswith("image/"):
+            pic = pic or data
+            continue
+        txt = data.decode("utf-8", "replace").strip()
+        if txt.startswith("{"):
+            try:
+                event = json.loads(txt)
+            except ValueError:
+                pass
+        elif txt.startswith("<") and event is None:
+            g = lambda k: (re.search(f"<{k}>([^<]*)</{k}>", txt) or [None, None])[1]
+            event = {"eventType": g("eventType"), "dateTime": g("dateTime"),
+                     "AccessControllerEvent": {k: g(k) for k in ("majorEventType", "subEventType", "name",
+                                                                 "employeeNoString", "serialNo", "attendanceStatus",
+                                                                 "currentVerifyMode")}}
+    return event, pic
+
+
+def handle_push(tid, token, ctype, body):
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not rows[0]["active"] or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404
+    event, pic = _push_parts(ctype, body)
+    st = TSTATE.setdefault(tid, {})
+    st.update(connected=True, error=None, need_login=False, push=True, last_poll=fmt_time(now_local()))
+    if not event:
+        return 200
+    a = event.get("AccessControllerEvent") or {}
+    emp = str(a.get("employeeNoString") or a.get("employeeNo") or "").strip()
+    if event.get("eventType") != "AccessControllerEvent" or str(a.get("majorEventType")) != "5" or not emp:
+        return 200   # yurak urishi (heartbeat) yoki o'tish bo'lmagan hodisa
+    t = event.get("dateTime") or fmt_time(now_local())
+    try:
+        serial = int(a.get("serialNo"))
+    except (TypeError, ValueError):
+        serial = None
+    eid = add_event(tid, {"employeeNoString": emp, "name": a.get("name") or "", "time": t, "serialNo": serial,
+                          "attendanceStatus": a.get("attendanceStatus") or "",
+                          "currentVerifyMode": a.get("currentVerifyMode") or ""})
+    if eid:
+        if pic and pic[:2] == b"\xff\xd8":
+            s = db.q("SELECT serial FROM events WHERE id=?", (eid,))[0]["serial"]
+            with open(os.path.join(PHOTOS, f"{tid}_{s}.jpg"), "wb") as f:
+                f.write(pic)
+        tg_notify([eid])
+    return 200
+
+
 # ----------------------------------------------------------------- zaxira (boshqa kompyuter/serverga ko'chirish)
 BACKUP_RE = re.compile(r"^(attendance\.db|config\.json|photos/[\w.-]+\.jpg|faces/[\w.-]+\.(jpg|none))$")
 
@@ -1937,7 +2019,7 @@ def terminals_info():
         out.append({**t, "connected": st.get("connected", False), "error": st.get("error"),
                     "need_login": st.get("need_login", False), "last_poll": st.get("last_poll"),
                     "model": (st.get("device") or {}).get("model", ""), "events_total": agg["n"],
-                    "last_event": agg["last"], "users_total": users})
+                    "last_event": agg["last"], "users_total": users, "push": bool(st.get("push"))})
     return out
 
 
@@ -2079,7 +2161,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "repeat_gap_seconds": CFG.get("repeat_gap_seconds"),
                                        "terminals": [{k: t[k] for k in ("id", "name", "host", "connected", "error",
                                                                          "need_login", "last_poll", "model",
-                                                                         "events_total", "last_event", "active")}
+                                                                         "events_total", "last_event", "active", "push")}
                                                      for t in terminals_info()],
                                        "unlinked": unlinked_count(make_ctx())})
             if p == "/api/terminals":
@@ -2152,6 +2234,16 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path
         if p == "/api/backup/restore":
             return self.restore_upload()
+        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
+        if m:
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n) if 0 <= n <= 8 * 1024 * 1024 else b""
+                code = handle_push(int(m.group(1)), m.group(2), self.headers.get("Content-Type") or "", body)
+            except Exception as e:
+                print(f"[push] xato: {e}", flush=True)
+                code = 200   # terminal qayta-qayta yubormasligi uchun
+            return self.send(code, b"" if code != 200 else b"OK", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")

@@ -755,7 +755,7 @@ async function pollState(){
 }
 function termStatus(t){
   if (!t.active) return ["muted", "O'chirib qo'yilgan · tarixi saqlanadi"];
-  if (t.connected) return ["ok", `Ulangan · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
+  if (t.connected) return ["ok", `${t.push ? "Internet orqali ulangan" : "Ulangan"} · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
   if (t.need_login) return ["bad", "Login/parol kerak"];
   return ["warn", "Ulanmagan"];
 }
