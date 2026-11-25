@@ -214,6 +214,8 @@ class DB:
             CREATE TABLE IF NOT EXISTS billz_days(date TEXT PRIMARY KEY, data TEXT, fetched REAL, final INTEGER);
             CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, terminal_id INTEGER,
                 payload TEXT, status TEXT, result TEXT, created REAL, taken REAL);
+            CREATE TABLE IF NOT EXISTS term_groups(terminal_id INTEGER, group_id INTEGER, name TEXT,
+                PRIMARY KEY(terminal_id, group_id));
             CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY, date TEXT, fund TEXT, article TEXT,
                 cashbox TEXT, amount REAL, currency TEXT, comment TEXT, created TEXT, author TEXT, fetched REAL);
             CREATE INDEX IF NOT EXISTS exp_date ON expenses(date);
@@ -222,6 +224,8 @@ class DB:
             if "active" not in tcols:
                 # o'chirib qo'yilgan terminal: tarixi qoladi, lekin server unga ulanmaydi
                 c.execute("ALTER TABLE terminals ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+            if "dept_id" not in [r[1] for r in c.execute("PRAGMA table_info(term_users)")]:
+                c.execute("ALTER TABLE term_users ADD COLUMN dept_id INTEGER")  # terminaldagi departament
             for col in ("mac", "serial"):  # IP o'zgarsa terminalni tarmoqdan shu bo'yicha topamiz
                 if col not in tcols:
                     c.execute(f"ALTER TABLE terminals ADD COLUMN {col} TEXT")
@@ -232,7 +236,7 @@ class DB:
                           "FROM events_old")
                 c.execute("DROP TABLE events_old")
                 if c.execute("SELECT name FROM sqlite_master WHERE name='users'").fetchone():
-                    c.execute("INSERT OR IGNORE INTO term_users SELECT 1, emp, name FROM users")
+                    c.execute("INSERT OR IGNORE INTO term_users(terminal_id, emp, name) SELECT 1, emp, name FROM users")
                     c.execute("DROP TABLE users")
                 for f in os.listdir(PHOTOS):
                     if re.fullmatch(r"\d+\.jpg", f):
@@ -266,9 +270,52 @@ def term_names():
     return {t["id"]: t["name"] for t in db.q("SELECT id, name FROM terminals")}
 
 
-def upsert_term_user(tid, emp, name):
+def upsert_term_user(tid, emp, name, dept_id=None):
     db.x("INSERT INTO term_users(terminal_id, emp, name) VALUES(?,?,?) ON CONFLICT(terminal_id, emp) DO UPDATE "
          "SET name=CASE WHEN excluded.name!='' THEN excluded.name ELSE term_users.name END", (tid, emp, name or ""))
+    if dept_id is not None:
+        db.x("UPDATE term_users SET dept_id=? WHERE terminal_id=? AND emp=?", (int(dept_id or 0), tid, emp))
+
+
+def store_term_groups(tid, groups):
+    """Terminal departamentlari ro'yxatini bazada yangilash: [[id, nom], ...]"""
+    clean = []
+    for g in groups or []:
+        try:
+            gid, name = int(g[0]), str(g[1] or "").strip()[:32]
+        except (IndexError, TypeError, ValueError):
+            continue
+        if gid > 0 and name:
+            clean.append((tid, gid, name))
+    if not clean:
+        return
+    with db.lock:
+        db.conn.execute("DELETE FROM term_groups WHERE terminal_id=?", (tid,))
+        db.conn.executemany("INSERT OR REPLACE INTO term_groups(terminal_id, group_id, name) VALUES(?,?,?)", clean)
+        db.conn.commit()
+
+
+def term_groups(tid):
+    return [[r["group_id"], r["name"]] for r in
+            db.q("SELECT group_id, name FROM term_groups WHERE terminal_id=? ORDER BY group_id", (tid,))]
+
+
+def fetch_term_groups(dev):
+    """Terminaldagi departamentlar (Hikvision: LocalAttendance group). Topilmasa — None."""
+    out, pos, sid = [], 0, uuid.uuid4().hex[:16]
+    for _ in range(20):
+        st, j = dev.post_json("/ISAPI/AccessControl/LocalAttendance/groupSearch?format=json",
+                              {"GroupSearchCond": {"searchID": sid, "searchResultPosition": pos, "maxResults": 15,
+                                                   "searchType": "all"}}, fatal=False)
+        if st != 200 or not isinstance(j, dict):
+            return out or None
+        r = j.get("GroupSearchResult") or {}
+        lst = r.get("GroupInfo") or []
+        out += [[g.get("groupId"), g.get("groupName", "")] for g in lst if g.get("groupId")]
+        pos += len(lst)
+        if not lst or pos >= int(r.get("totalMatches") or 0):
+            break
+    return out
 
 
 def add_event(tid, ev):
@@ -344,14 +391,20 @@ class Poller(threading.Thread):
             for u in lst:
                 emp = str(u.get("employeeNo", "")).strip()
                 if emp:
-                    upsert_term_user(self.tid, emp, u.get("name", ""))
-                    seen.append([emp, u.get("name", "")])
+                    gid = int(u.get("groupId") or 0)
+                    upsert_term_user(self.tid, emp, u.get("name", ""), gid)
+                    seen.append([emp, u.get("name", ""), gid])
             pos += len(lst)
             if s.get("responseStatusStrg") != "MORE" or not lst:
                 break
         self.users_at = time.time()
+        try:
+            store_term_groups(self.tid, fetch_term_groups(self.device))
+        except Exception:
+            pass
         if seen and CFG.get("cloud_url") and not CLOUD:
-            threading.Thread(target=send_users_to_cloud, args=(self.tid, seen), daemon=True).start()
+            threading.Thread(target=send_users_to_cloud, args=(self.tid, seen, term_groups(self.tid)),
+                             daemon=True).start()
 
     def poll_once(self):
         if not self.state.get("device"):
@@ -455,16 +508,33 @@ def make_ctx():
         "links": {(l["terminal_id"], l["emp"]): l["staff_id"] for l in db.q("SELECT * FROM links")},
         "tusers": {(u["terminal_id"], u["emp"]): u["name"] for u in db.q("SELECT * FROM term_users")},
         "tnames": term_names(),
+        "tdept": {(r["terminal_id"], r["emp"]): r["name"] for r in db.q(
+            "SELECT u.terminal_id, u.emp, g.name FROM term_users u JOIN term_groups g "
+            "ON g.terminal_id = u.terminal_id AND g.group_id = u.dept_id")},
     }
+
+
+def dept_of(sid, ctx):
+    """Xodim departamenti: terminaldagisi (bir nechta bo'lsa — birinchisi), bo'lmasa dashboarddagi bo'limi."""
+    if "sdept" not in ctx:
+        sd = {}
+        for k in sorted(ctx["links"]):
+            v = ctx["links"][k]
+            if v not in sd and ctx["tdept"].get(k):
+                sd[v] = ctx["tdept"][k]
+        ctx["sdept"] = sd
+    s = ctx["staff"].get(sid) or {}
+    return ctx["sdept"].get(sid) or s.get("dept") or ""
 
 
 def person_of(tid, emp, ctx, ev_name=""):
     sid = ctx["links"].get((tid, emp))
     s = ctx["staff"].get(sid)
     if s:
-        return {"key": f"s{sid}", "name": s["name"], "code": s["code"] or "", "dept": s["dept"] or "", "linked": True}
+        return {"key": f"s{sid}", "name": s["name"], "code": s["code"] or "", "dept": dept_of(sid, ctx), "linked": True}
     return {"key": f"t{tid}-{emp}", "name": ctx["tusers"].get((tid, emp)) or ev_name or "",
-            "code": f"{ctx['tnames'].get(tid, '?')} · ID {emp}", "dept": "", "linked": False}
+            "code": f"{ctx['tnames'].get(tid, '?')} · ID {emp}", "dept": ctx["tdept"].get((tid, emp), ""),
+            "linked": False}
 
 
 def key_pairs(key, ctx):
@@ -612,7 +682,7 @@ def export_csv(d1, d2, tid=None):
     out = io.StringIO()
     out.write("﻿")  # Excel UTF-8 ni to'g'ri o'qishi uchun
     w = csv.writer(out, delimiter=";")
-    w.writerow(["Sana", "Xodim", "Tabel / ID", "Bo'lim", "Keldi", "Keldi (terminal)", "Ketdi", "Ketdi (terminal)",
+    w.writerow(["Sana", "Xodim", "Tabel / ID", "Departament", "Keldi", "Keldi (terminal)", "Ketdi", "Ketdi (terminal)",
                 "Ishlagan (soat)", "Kechikish (daq)", "Terminallar"])
     dt = datetime.strptime(d1, "%Y-%m-%d")
     end = datetime.strptime(d2, "%Y-%m-%d")
@@ -2137,9 +2207,9 @@ class CloudSync(threading.Thread):
 CLOUD_USERS_SENT = {}   # tid -> oxirgi yuborilgan ro'yxat (o'zgarmasa qayta yubormaymiz)
 
 
-def send_users_to_cloud(tid, users):
-    """Ofisdagi nusxa: terminal foydalanuvchilari ro'yxatini bulut serveriga yuboradi."""
-    key = json.dumps(sorted(users), ensure_ascii=False)
+def send_users_to_cloud(tid, users, groups=None):
+    """Ofisdagi nusxa: terminal foydalanuvchilari (va departamentlar) ro'yxatini bulut serveriga yuboradi."""
+    key = json.dumps([sorted(users), groups or []], ensure_ascii=False)
     if CLOUD_USERS_SENT.get(tid) == key:
         return
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
@@ -2149,7 +2219,7 @@ def send_users_to_cloud(tid, users):
     try:
         conn = http.client.HTTPSConnection(u.hostname, u.port, timeout=20)
         conn.request("POST", f"/hook/{tid}/{push_token(rows[0])}/users",
-                     json.dumps({"users": users}, ensure_ascii=False).encode("utf-8"),
+                     json.dumps({"users": users, "groups": groups or []}, ensure_ascii=False).encode("utf-8"),
                      {"Content-Type": "application/json"})
         r = conn.getresponse()
         r.read()
@@ -2168,14 +2238,17 @@ def receive_users(tid, token, b):
     users = b.get("users")
     if not isinstance(users, list) or len(users) > 5000:
         return 400, {"error": "noto'g'ri ro'yxat"}
+    if isinstance(b.get("groups"), list) and len(b["groups"]) <= 256:
+        store_term_groups(tid, b["groups"])
     keep = set()
     for item in users:
         try:
             emp, name = str(item[0]).strip()[:32], str(item[1] or "")[:64]
-        except (IndexError, TypeError):
+            gid = int(item[2]) if len(item) > 2 and item[2] is not None else None
+        except (IndexError, TypeError, ValueError):
             continue
         if emp:
-            upsert_term_user(tid, emp, name)
+            upsert_term_user(tid, emp, name, gid)
             keep.add(emp)
     if keep:   # terminaldan o'chirilganlar ro'yxatdan ham olinadi (o'tishlari qoladi)
         for r in db.q("SELECT emp FROM term_users WHERE terminal_id=?", (tid,)):
@@ -2411,6 +2484,10 @@ def enroll_person(b):
     emp = str(b.get("emp") or "").strip()
     name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()
     edit = bool(b.get("edit"))
+    try:
+        gid = int(b.get("group_id") or 0)
+    except (TypeError, ValueError):
+        gid = 0
     img = None
     if b.get("photo"):
         try:
@@ -2433,12 +2510,15 @@ def enroll_person(b):
         return 400, {"error": "Ism familiyani kiriting (32 belgigacha — terminal shuncha qabul qiladi)"}
     if not edit and not img:
         return 400, {"error": "Yuz rasmini qo'shing (kamera yoki fayl)"}
+    groups = dict(term_groups(tid))
+    if groups and gid not in groups:
+        return 400, {"error": "Departamentni tanlang (xodim qaysi bo'limda ishlaydi)"}
     if not edit and db.q("SELECT 1 FROM term_users WHERE terminal_id=? AND emp=?", (tid, emp)):
         return 409, {"error": f"ID {emp} {t['name']} terminalida band. Boshqa raqam tanlang."}
 
     if CLOUD and not DEMO:
         # bulutdan terminalga ulanib bo'lmaydi — buyruq navbatga, uni ofis kompyuteri bajaradi
-        return queue_job("enroll", tid, {**b, "emp": emp, "name": name})
+        return queue_job("enroll", tid, {**b, "emp": emp, "name": name, "group_id": gid})
 
     if not DEMO:
         dev = device_of(tid)
@@ -2448,6 +2528,8 @@ def enroll_person(b):
                              "Valid": {"enable": True, "beginTime": "2020-01-01T00:00:00",
                                        "endTime": "2037-12-31T23:59:59", "timeType": "local"},
                              "doorRight": "1", "RightPlan": [{"doorNo": 1, "planTemplateNo": "1"}]}}
+        if gid:
+            user["UserInfo"]["groupId"] = gid   # departament (terminalda "Департамент")
         try:
             if edit:
                 st, j = _isapi_json(dev, "PUT", "/ISAPI/AccessControl/UserInfo/Modify?format=json", user)
@@ -2467,22 +2549,23 @@ def enroll_person(b):
                 if not _ok_isapi(st, j):
                     msg = "Xodim terminalga yozildi, lekin yuz rasmi qabul qilinmadi: " + _isapi_err(j, st) + \
                           ". Yuz aniq, yorug' joyda, to'g'ridan va yolg'iz tushgan rasm tanlang."
-                    upsert_term_user(tid, emp, name)
+                    upsert_term_user(tid, emp, name, gid or None)
                     return 400, {"error": msg, "user_saved": True}
         except AuthError:
             return 403, {"error": "Terminal login/paroli noto'g'ri"}
         except Exception as e:
             return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
-    _enroll_finish(tid, emp, name, img, b.get("staff_id"))
+    _enroll_finish(tid, emp, name, img, b.get("staff_id"), gid)
     return 200, {"ok": True, "emp": emp}
 
 
-def _enroll_finish(tid, emp, name, img, sid):
-    upsert_term_user(tid, emp, name)
+def _enroll_finish(tid, emp, name, img, sid, gid=0):
+    upsert_term_user(tid, emp, name, gid or None)
     if img:
         _cache_face(tid, emp, img)
     if sid == "new":
-        sid = db.x("INSERT INTO staff(name, code, dept, created) VALUES(?,?,?,?)", (name, "", "", fmt_time(now_local())))
+        dept = dict(term_groups(tid)).get(gid, "") if gid else ""
+        sid = db.x("INSERT INTO staff(name, code, dept, created) VALUES(?,?,?,?)", (name, "", dept, fmt_time(now_local())))
     if sid not in (None, "", 0):
         db.x("INSERT OR REPLACE INTO links(terminal_id, emp, staff_id) VALUES(?,?,?)", (tid, emp, int(sid)))
 
@@ -2540,7 +2623,7 @@ def job_result(tid, token, b):
     ok = b.get("code") == 200
     if j["kind"] == "enroll" and (ok or res.get("user_saved")):
         img = base64.b64decode(str(p["photo"]).split(",", 1)[-1]) if p.get("photo") and ok else None
-        _enroll_finish(tid, p["emp"], p["name"], img, p.get("staff_id"))
+        _enroll_finish(tid, p["emp"], p["name"], img, p.get("staff_id"), int(p.get("group_id") or 0))
     if j["kind"] == "delete" and ok:
         db.x("DELETE FROM term_users WHERE terminal_id=? AND emp=?", (tid, p["emp"]))
         _cache_face(tid, p["emp"], None)
@@ -2597,6 +2680,7 @@ def staff_info():
     for s in db.q("SELECT id, name, code, dept FROM staff ORDER BY lower(name)"):
         s["links"] = [{"terminal_id": t, "terminal": tn.get(t, "?"), "emp": e, "tname": ctx["tusers"].get((t, e), "")}
                       for (t, e), sid in sorted(ctx["links"].items()) if sid == s["id"] and t in tn]
+        s["tdept"] = dept_of(s["id"], ctx)
         staff.append(s)
     tusers = []
     for (t, e), name in sorted(ctx["tusers"].items(), key=lambda x: (x[0][0], x[0][1].zfill(12))):
@@ -2604,10 +2688,11 @@ def staff_info():
             continue
         sid = ctx["links"].get((t, e))
         tusers.append({"terminal_id": t, "terminal": tn[t], "emp": e, "name": name,
-                       "staff_id": sid if sid in ctx["staff"] else None})
+                       "staff_id": sid if sid in ctx["staff"] else None, "dept": ctx["tdept"].get((t, e), "")})
     act = {t["id"]: bool(t["active"]) for t in terminals()}
     return {"staff": staff, "term_users": tusers,
-            "terminals": [{"id": k, "name": v, "active": act.get(k, True)} for k, v in sorted(tn.items())]}
+            "terminals": [{"id": k, "name": v, "active": act.get(k, True), "groups": term_groups(k)}
+                          for k, v in sorted(tn.items())]}
 
 
 def save_staff(b):

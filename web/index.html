@@ -845,6 +845,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
       <label class="field"><span>Terminal</span><select id="enTerm"></select></label>
       <label class="field"><span>Ism familiya (terminal ekranida chiqadi)</span><input id="enName" maxlength="32" placeholder="Masalan: Ayubxon Sattorov"></label>
       <label class="field"><span>ID raqami</span><input id="enEmp" maxlength="32" inputmode="numeric" placeholder="1"></label>
+      <label class="field" id="enDeptF"><span>Departament (qaysi bo'limda ishlaydi)</span><select id="enDept"></select></label>
       <label class="field" id="enStaffF"><span>Dashboarddagi xodim</span><select id="enStaff"></select></label>
       <ul class="tips">
         <li>Yuz to'g'ridan, yorug' joyda, ko'zoynaksiz va yolg'iz tushsin.</li>
@@ -1476,7 +1477,7 @@ async function loadStaff(){
   // xodimlar
   $("staffBody").innerHTML = ST.staff.map(s => `<tr class="row" data-id="${s.id}">
     <td><div class="who"><div class="av">${av("s" + s.id, s.name)}</div><b>${esc(s.name)}</b></div></td>
-    <td>${esc(s.code) || '<span class="muted">—</span>'}</td><td>${esc(s.dept) || '<span class="muted">—</span>'}</td>
+    <td>${esc(s.code) || '<span class="muted">—</span>'}</td><td>${esc(s.tdept || s.dept) || '<span class="muted">—</span>'}</td>
     <td><div class="chips">${s.links.map(l => `<span class="pill p-term">${esc(l.terminal)} · ID ${esc(l.emp)}</span>`).join("") || '<span class="pill p-unl">bog\'lanmagan</span>'}</div></td>
     <td style="text-align:right"><button class="btn danger sm" data-sdel="${s.id}">O'chirish</button></td></tr>`).join("")
     || `<tr class="empty"><td colspan="5">Hali xodim yo'q. "+ Xodim qo'shish" yoki "Moslash" bo'limidagi avtomatik bog'lashdan foydalaning.</td></tr>`;
@@ -1492,7 +1493,7 @@ async function loadStaff(){
   const staffOpts = sel => `<option value="">— bog'lanmagan —</option><option value="new">+ Yangi xodim yaratish</option>` +
     ST.staff.map(s => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.name)}${s.code ? " (" + esc(s.code) + ")" : ""}</option>`).join("");
   $("matchBody").innerHTML = ST.term_users.filter(u => !only || !u.staff_id).map(u => `<tr>
-    <td>${tpill(u.terminal)}</td><td class="num">${esc(u.emp)}</td><td>${esc(u.name) || '<span class="muted">—</span>'}</td>
+    <td>${tpill(u.terminal)}</td><td class="num">${esc(u.emp)}</td><td>${esc(u.name) || '<span class="muted">—</span>'}${u.dept ? `<small class="muted" style="display:block">${esc(u.dept)}</small>` : ""}</td>
     <td><select class="sel" style="min-width:230px" data-t="${u.terminal_id}" data-e="${esc(u.emp)}">${staffOpts(u.staff_id)}</select>
     ${u.staff_id ? "" : '<span class="pill p-unl" style="margin-left:6px">bog\'lanmagan</span>'}</td>
     <td style="text-align:right;white-space:nowrap">${termActive(u.terminal_id) ? `<button class="btn ghost sm" type="button" data-enr="${u.terminal_id}|${esc(u.emp)}" title="Ism yoki yuz rasmini yangilash">📷 Yuz</button>
@@ -1597,6 +1598,7 @@ function enrollForm(u){
   $("enTerm").value = u ? u.terminal_id : terms[0].id; $("enTerm").disabled = !!u;
   $("enName").value = u ? u.name : "";
   $("enEmp").value = u ? u.emp : nextEmp(+$("enTerm").value); $("enEmp").readOnly = !!u;
+  enrDepts(+$("enTerm").value, u ? u.dept : "");
   $("enStaffF").hidden = !!(u && u.staff_id);
   $("enStaff").innerHTML = `<option value="new">+ Yangi xodim sifatida qo'shish</option><option value="">— bog'lamaslik —</option>` +
     ST.staff.map(s => `<option value="${s.id}">${esc(s.name)}${s.code ? " (" + esc(s.code) + ")" : ""}</option>`).join("");
@@ -1606,7 +1608,15 @@ function enrollForm(u){
   openModal("mEnroll"); setTimeout(() => $("enName").focus(), 50);
 }
 $("addEnroll").onclick = () => enrollForm(null);
-$("enTerm").onchange = () => { if (!enrEdit) $("enEmp").value = nextEmp(+$("enTerm").value); };
+// terminaldagi departamentlar ("Департамент") — ro'yxat terminaldan olinadi
+function enrDepts(tid, curName){
+  const t = (ST.terminals || []).find(t => t.id === tid), gs = (t && t.groups) || [];
+  $("enDeptF").hidden = !gs.length;
+  $("enDept").innerHTML = `<option value="">— departamentni tanlang —</option>` + gs.map(g => `<option value="${g[0]}">${esc(g[1])}</option>`).join("");
+  const cur = gs.find(g => g[1] === curName);
+  $("enDept").value = cur ? cur[0] : "";
+}
+$("enTerm").onchange = () => { if (!enrEdit) $("enEmp").value = nextEmp(+$("enTerm").value); enrDepts(+$("enTerm").value, ""); };
 $("enPick").onclick = () => { enrStopCam(); $("enFile").click(); };
 $("enFile").onchange = () => {
   const f = $("enFile").files[0]; $("enFile").value = "";
@@ -1647,11 +1657,12 @@ async function waitJob(d, onWait){
 }
 $("enrForm").onsubmit = async ev => {
   ev.preventDefault(); showErr("enErr", "");
+  if (!$("enDeptF").hidden && !$("enDept").value){ showErr("enErr", "Departamentni tanlang — xodim qaysi bo'limda ishlaydi"); $("enDept").focus(); return; }
   const btn = $("enBtn"), label = btn.textContent;
   btn.disabled = true; btn.textContent = "Terminalga yozilmoqda…";
   try{
     const d = await post("/api/terminals/person", {terminal_id: +$("enTerm").value, emp: $("enEmp").value.trim(), name: $("enName").value.trim(),
-      photo: enrPhoto, edit: !!enrEdit, staff_id: $("enStaffF").hidden ? null : ($("enStaff").value === "new" ? "new" : ($("enStaff").value ? +$("enStaff").value : null))});
+      photo: enrPhoto, edit: !!enrEdit, group_id: $("enDeptF").hidden ? null : +$("enDept").value, staff_id: $("enStaffF").hidden ? null : ($("enStaff").value === "new" ? "new" : ($("enStaff").value ? +$("enStaff").value : null))});
     btn.textContent = "Ofis kompyuteriga yuborildi…";
     await waitJob(d, taken => btn.textContent = taken ? "Ofis kompyuteri terminalga yozmoqda…" : "Ofis kompyuteri kutilmoqda…");
     enrStopCam(); closeModal($("mEnroll")); await loadStaff(); pollState();
