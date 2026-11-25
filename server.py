@@ -326,6 +326,7 @@ class Poller(threading.Thread):
     def sync_users(self):
         pos = 0
         sid = uuid.uuid4().hex[:16]
+        seen = []
         while True:
             st, j = self.device.post_json("/ISAPI/AccessControl/UserInfo/Search?format=json",
                                           {"UserInfoSearchCond": {"searchID": sid, "searchResultPosition": pos,
@@ -338,16 +339,20 @@ class Poller(threading.Thread):
                 emp = str(u.get("employeeNo", "")).strip()
                 if emp:
                     upsert_term_user(self.tid, emp, u.get("name", ""))
+                    seen.append([emp, u.get("name", "")])
             pos += len(lst)
             if s.get("responseStatusStrg") != "MORE" or not lst:
                 break
         self.users_at = time.time()
+        if seen and CFG.get("cloud_url") and not CLOUD:
+            threading.Thread(target=send_users_to_cloud, args=(self.tid, seen), daemon=True).start()
 
     def poll_once(self):
         if not self.state.get("device"):
             self.state["device"] = self.device.info()
             remember_identity(self.tid, self.state["device"])
-        if time.time() - self.users_at > 600:
+        # bulut ishlatilsa — terminalga yangi qo'shilgan odamlar serverda tezroq ko'rinsin
+        if time.time() - self.users_at > (90 if CFG.get("cloud_url") else 600):
             self.sync_users()
         last = db.q("SELECT MAX(time) t FROM events WHERE terminal_id=?", (self.tid,))[0]["t"]
         now = now_local()
@@ -1791,13 +1796,81 @@ def set_forward(tid, token, b):
     return 200, {"ok": True, "forward": bool(url)}
 
 
+CLOUD_USERS_SENT = {}   # tid -> oxirgi yuborilgan ro'yxat (o'zgarmasa qayta yubormaymiz)
+
+
+def send_users_to_cloud(tid, users):
+    """Ofisdagi nusxa: terminal foydalanuvchilari ro'yxatini bulut serveriga yuboradi."""
+    key = json.dumps(sorted(users), ensure_ascii=False)
+    if CLOUD_USERS_SENT.get(tid) == key:
+        return
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    u = urlsplit(CFG.get("cloud_url") or "")
+    if not rows or u.scheme != "https" or not u.hostname:
+        return
+    try:
+        conn = http.client.HTTPSConnection(u.hostname, u.port, timeout=20)
+        conn.request("POST", f"/hook/{tid}/{push_token(rows[0])}/users",
+                     json.dumps({"users": users}, ensure_ascii=False).encode("utf-8"),
+                     {"Content-Type": "application/json"})
+        r = conn.getresponse()
+        r.read()
+        conn.close()
+        if r.status == 200:
+            CLOUD_USERS_SENT[tid] = key
+    except Exception as e:
+        print(f"[bulut] xodimlar ro'yxati yuborilmadi: {e}", flush=True)
+
+
+def receive_users(tid, token, b):
+    """Bulut: ofisdagi nusxadan terminal foydalanuvchilari ro'yxatini qabul qilish (to'liq ro'yxat)."""
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    users = b.get("users")
+    if not isinstance(users, list) or len(users) > 5000:
+        return 400, {"error": "noto'g'ri ro'yxat"}
+    keep = set()
+    for item in users:
+        try:
+            emp, name = str(item[0]).strip()[:32], str(item[1] or "")[:64]
+        except (IndexError, TypeError):
+            continue
+        if emp:
+            upsert_term_user(tid, emp, name)
+            keep.add(emp)
+    if keep:   # terminaldan o'chirilganlar ro'yxatdan ham olinadi (o'tishlari qoladi)
+        for r in db.q("SELECT emp FROM term_users WHERE terminal_id=?", (tid,)):
+            if r["emp"] not in keep:
+                db.x("DELETE FROM term_users WHERE terminal_id=? AND emp=?", (tid, r["emp"]))
+    return 200, {"ok": True, "count": len(keep)}
+
+
+def add_term_user_manual(b):
+    """Terminal ID sini qo'lda qo'shish (bulutda terminalga ulanib bo'lmaganda)."""
+    try:
+        tid = int(b.get("terminal_id") or 0)
+    except ValueError:
+        return 400, {"error": "Terminalni tanlang"}
+    emp = str(b.get("emp") or "").strip()
+    name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()[:64]
+    if not db.q("SELECT 1 FROM terminals WHERE id=?", (tid,)):
+        return 404, {"error": "Terminal topilmadi"}
+    if not EMP_RE.match(emp):
+        return 400, {"error": "Terminaldagi ID raqamini kiriting (masalan 8)"}
+    upsert_term_user(tid, emp, name)
+    return 200, {"ok": True}
+
+
 def push_status(tid, token):
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     if not rows or not hmac.compare_digest(push_token(rows[0]), token):
         return 404, {"error": "topilmadi"}
     st = TSTATE.get(tid, {})
     last = db.q("SELECT time, emp FROM events WHERE terminal_id=? ORDER BY time DESC LIMIT 1", (tid,))
+    users = [r["emp"] for r in db.q("SELECT emp FROM term_users WHERE terminal_id=?", (tid,))]
     return 200, {"last_push": st.get("last_poll"), "connected": st.get("connected"), "forward": bool(forward_url(tid)),
+                 "term_users": sorted(users),
                  "forward_state": FWD_STATE.get(tid, {}), "last_event": last[0] if last else None}
 
 
@@ -2311,15 +2384,17 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path
         if p == "/api/backup/restore":
             return self.restore_upload()
-        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status)", p)
+        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status|users)", p)
         if m:
             try:
                 n = int(self.headers.get("Content-Length") or 0)
-                b = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 <= n <= 4096 else {}
+                b = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 <= n <= 1024 * 1024 else {}
             except Exception:
                 return self.send(400, {"error": "Noto'g'ri so'rov"})
-            tid, tok = int(m.group(1)), m.group(2)
-            return self.send(*(set_forward(tid, tok, b) if m.group(3) == "forward" else push_status(tid, tok)))
+            tid, tok, what = int(m.group(1)), m.group(2), m.group(3)
+            fn = {"forward": lambda: set_forward(tid, tok, b), "status": lambda: push_status(tid, tok),
+                  "users": lambda: receive_users(tid, tok, b)}[what]
+            return self.send(*fn())
         m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
         if m:
             try:
@@ -2409,6 +2484,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(*enroll_person(body))
             if p == "/api/terminals/person/delete":
                 return self.send(*remove_person(body))
+            if p == "/api/terminals/user/add":
+                return self.send(*add_term_user_manual(body))
             if p == "/api/staff/save":
                 return self.send(*save_staff(body))
             if p == "/api/staff/delete":

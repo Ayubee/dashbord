@@ -596,7 +596,18 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
             <div style="display:flex;gap:14px;align-items:center;margin:4px 0 6px;flex-wrap:wrap">
               <label class="check"><input type="checkbox" id="onlyUnl"> Faqat bog'lanmaganlar</label>
               <span class="muted" id="autoMsg"></span>
+              <button class="btn ghost sm" type="button" id="manualIdBtn" style="margin-left:auto">+ ID ni qo'lda qo'shish</button>
             </div>
+            <form id="manualId" hidden class="card" style="padding:14px;margin:0 0 10px;box-shadow:none">
+              <p class="muted" style="margin:0 0 10px;font-size:12.5px">Terminalga yangi odam qo'shgan bo'lsangiz-u, u bu ro'yxatda hali chiqmagan bo'lsa (u hali terminaldan o'tmagan va ofis kompyuteri o'chiq), terminaldagi ID va ismini shu yerga yozing.</p>
+              <div class="row3">
+                <label class="field"><span>Terminal</span><select id="miTerm"></select></label>
+                <label class="field"><span>Terminaldagi ID</span><input id="miEmp" maxlength="32" placeholder="8"></label>
+                <label class="field"><span>Ism</span><input id="miName" maxlength="64" placeholder="Terminaldagi ism"></label>
+              </div>
+              <button class="btn sm" type="submit">Qo'shish</button>
+              <div class="ferr" id="miErr"></div>
+            </form>
             <div class="tablewrap"><table class="stk-match"><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th><th></th></tr></thead><tbody id="matchBody"></tbody></table></div>
           </div>
           <!-- zaxira -->
@@ -1333,6 +1344,18 @@ async function loadStaff(){
   });
 }
 $("onlyUnl").onchange = loadStaff;
+$("manualIdBtn").onclick = () => {
+  const f = $("manualId"); f.hidden = !f.hidden;
+  $("miTerm").innerHTML = (ST ? ST.terminals.filter(t => t.active !== false) : []).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  showErr("miErr", ""); if (!f.hidden) $("miEmp").focus();
+};
+$("manualId").onsubmit = async ev => {
+  ev.preventDefault(); showErr("miErr", "");
+  try{
+    await post("/api/terminals/user/add", {terminal_id: +$("miTerm").value, emp: $("miEmp").value.trim(), name: $("miName").value.trim()});
+    $("miEmp").value = $("miName").value = ""; $("manualId").hidden = true; $("onlyUnl").checked = true; loadStaff(); pollState();
+  }catch(e){ showErr("miErr", e.message); }
+};
 $("autoLink").onclick = async () => {
   const d = await post("/api/staff/autolink");
   $("autoMsg").textContent = `✓ ${d.linked} ta mavjud xodimga ulandi, ${d.created} ta yangi xodim yaratildi`;
