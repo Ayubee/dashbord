@@ -15,6 +15,7 @@ import csv
 import hashlib
 import hmac
 import html
+import html.parser
 import http.client
 import io
 import queue
@@ -213,6 +214,9 @@ class DB:
             CREATE TABLE IF NOT EXISTS billz_days(date TEXT PRIMARY KEY, data TEXT, fetched REAL, final INTEGER);
             CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, terminal_id INTEGER,
                 payload TEXT, status TEXT, result TEXT, created REAL, taken REAL);
+            CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY, date TEXT, fund TEXT, article TEXT,
+                cashbox TEXT, amount REAL, currency TEXT, comment TEXT, created TEXT, author TEXT, fetched REAL);
+            CREATE INDEX IF NOT EXISTS exp_date ON expenses(date);
             """)
             tcols = [r[1] for r in c.execute("PRAGMA table_info(terminals)")]
             if "active" not in tcols:
@@ -1436,6 +1440,263 @@ def billz_save(b):
     return 200, {"ok": True, **billz_public()}
 
 
+# ----------------------------------------------------------------- SalesDoc rasxodlari (faqat o'qish)
+# SalesDoc'da API yo'q: dashboard foydalanuvchi logini bilan kirib, "Расходы" sahifasidagi jadvalni o'qiydi.
+# Hech qanday forma yuborilmaydi (kirishdan tashqari) — SalesDoc'dagi ma'lumot o'zgarmaydi.
+SD_LOCK = threading.Lock()
+SD_SESS = {"cookies": {}, "user": None, "host": None}
+SD_CACHE = {}
+SD_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Davomat-dashboard"
+
+
+class SalesDocError(Exception):
+    pass
+
+
+def sd_cfg():
+    c = {"host": "rafiq.salesdoc.io", "username": "", "password": "", "connected_at": None}
+    c.update(CFG.get("salesdoc") or {})
+    return c
+
+
+def _sd_http(host, method, path, form=None, cookies=None, timeout=60):
+    hdr = {"User-Agent": SD_UA, "Accept": "text/html,*/*"}
+    data = None
+    if form is not None:
+        from urllib.parse import urlencode
+        data = urlencode(form).encode("utf-8")
+        hdr["Content-Type"] = "application/x-www-form-urlencoded"
+    if cookies:
+        hdr["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    try:
+        conn = http.client.HTTPSConnection(host, timeout=timeout)
+        try:
+            conn.request(method, path, data, hdr)
+            r = conn.getresponse()
+            raw = r.read()
+            got = {}
+            for k, v in r.getheaders():
+                if k.lower() == "set-cookie":
+                    nv = v.split(";", 1)[0]
+                    if "=" in nv:
+                        n, val = nv.split("=", 1)
+                        got[n.strip()] = val.strip()
+            return r.status, r.getheader("Location"), got, raw.decode("utf-8", "ignore")
+        finally:
+            conn.close()
+    except Exception as e:
+        raise SalesDocError(f"SalesDoc serveriga ulanib bo'lmadi ({type(e).__name__}). Internetni tekshiring.")
+
+
+def _sd_is_login(page):
+    return "LoginForm[username]" in page
+
+
+def sd_login(host, username, password):
+    st, _, ck, _ = _sd_http(host, "GET", "/site/login")
+    cookies = {k: v for k, v in ck.items() if v and v != "deleted"}
+    st, loc, ck, page = _sd_http(host, "POST", "/site/login", {
+        "LoginForm[username]": username, "LoginForm[password]": password, "LoginForm[rememberMe]": "1"}, cookies)
+    for k, v in ck.items():
+        if v and v != "deleted":
+            cookies[k] = v
+        else:
+            cookies.pop(k, None)
+    if st not in (301, 302, 303) and (_sd_is_login(page) or st >= 400):
+        raise SalesDocError("SalesDoc login yoki parolni qabul qilmadi. SalesDoc saytiga kiradigan login/parolni tekshiring.")
+    return cookies
+
+
+class _SdTables(html.parser.HTMLParser):
+    """Sahifadagi hamma jadvallarni (sarlavha + qatorlar matni) yig'adi."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables, self.stack = [], []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.stack.append({"head": [], "rows": [], "row": None, "cell": None, "in_head": False})
+            return
+        if not self.stack:
+            return
+        t = self.stack[-1]
+        if tag == "thead":
+            t["in_head"] = True
+        elif tag == "tr":
+            t["row"] = {"cells": [], "id": None, "summa": None}
+        elif tag in ("td", "th") and t["row"] is not None:
+            t["cell"] = []
+        elif tag == "input" and t["row"] is not None:
+            a = dict(attrs)
+            if a.get("data-consumption-id"):
+                t["row"]["id"] = a["data-consumption-id"]
+        elif tag == "a" and t["row"] is not None:
+            a = dict(attrs)
+            if "update" in (a.get("class") or "").split() and a.get("summa"):
+                t["row"]["summa"] = a["summa"]  # aniq summa (tiyinlari bilan)
+
+    def handle_endtag(self, tag):
+        if not self.stack:
+            return
+        t = self.stack[-1]
+        if tag == "table":
+            self.tables.append(self.stack.pop())
+        elif tag == "thead":
+            t["in_head"] = False
+        elif tag in ("td", "th") and t["row"] is not None and t["cell"] is not None:
+            t["row"]["cells"].append(" ".join("".join(t["cell"]).split()))
+            t["cell"] = None
+        elif tag == "tr" and t["row"] is not None:
+            if t["in_head"]:
+                t["head"] = t["row"]["cells"]
+            else:
+                t["rows"].append(t["row"])
+            t["row"] = None
+
+    def handle_data(self, data):
+        if self.stack and self.stack[-1]["cell"] is not None:
+            self.stack[-1]["cell"].append(data)
+
+
+def _sd_num(s):
+    s = (s or "").replace("\xa0", "").replace(" ", "").replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _sd_date(s):
+    m = re.match(r"(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?", s or "")
+    if not m:
+        return ""
+    d = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return d + (" " + m.group(4) if m.group(4) else "")
+
+
+def sd_parse(page):
+    p = _SdTables()
+    p.feed(page)
+    cols = {"ИД": "id", "Фонд": "fund", "Статья расхода": "article", "Касса": "cashbox", "Сумма": "amount",
+            "Валюта": "currency", "Дата расхода": "date", "Дата создания": "created", "Кто добавил": "author",
+            "Комментарий": "comment"}
+    for t in p.tables:
+        if not {"Фонд", "Сумма", "Дата расхода"} <= set(t["head"]):
+            continue
+        idx = {cols[h]: i for i, h in enumerate(t["head"]) if h in cols}
+        out = []
+        for r in t["rows"]:
+            c = r["cells"]
+            g = lambda k: c[idx[k]] if k in idx and idx[k] < len(c) else ""
+            rid = r["id"] or g("id")
+            if not (rid and rid.isdigit()):
+                continue
+            out.append({"id": int(rid), "fund": g("fund"), "article": g("article"), "cashbox": g("cashbox"),
+                        "amount": _sd_num(r["summa"] or g("amount")), "currency": g("currency"), "date": _sd_date(g("date")),
+                        "created": _sd_date(g("created")), "author": g("author"), "comment": g("comment")})
+        return out
+    raise SalesDocError("SalesDoc'dagi rasxodlar jadvali topilmadi (sahifa tuzilishi o'zgargan bo'lishi mumkin).")
+
+
+def sd_fetch(d1, d2):
+    c = sd_cfg()
+    if not c["username"]:
+        raise SalesDocError("SalesDoc ulanmagan. Sozlamalar → SalesDoc bo'limida login/parolni kiriting.")
+    path = f"/finans/consumption?dateType=DATE&datestart={d1}&endstart={d2}"
+    with SD_LOCK:
+        if SD_SESS["user"] != c["username"] or SD_SESS["host"] != c["host"]:
+            SD_SESS.update(cookies={}, user=c["username"], host=c["host"])
+        for attempt in range(2):
+            if not SD_SESS["cookies"]:
+                SD_SESS["cookies"] = sd_login(c["host"], c["username"], c["password"])
+            st, loc, ck, page = _sd_http(c["host"], "GET", path, cookies=SD_SESS["cookies"], timeout=90)
+            if st == 200 and not _sd_is_login(page):
+                return sd_parse(page)
+            SD_SESS["cookies"] = {}  # sessiya eskirgan — qayta kiramiz
+        raise SalesDocError(f"SalesDoc rasxodlar sahifasini bermadi (HTTP {st}).")
+
+
+def sd_store(d1, d2, rows):
+    """Davr uchun bazadagi nusxani SalesDoc'dagisi bilan bir xil qiladi (o'chirilganlar ham o'chadi)."""
+    with db.lock:
+        c = db.conn
+        c.execute("DELETE FROM expenses WHERE date BETWEEN ? AND ?", (d1, d2))
+        c.executemany("INSERT OR REPLACE INTO expenses(id, date, fund, article, cashbox, amount, currency, comment, "
+                      "created, author, fetched) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                      [(r["id"], r["date"], r["fund"], r["article"], r["cashbox"], r["amount"], r["currency"],
+                        r["comment"], r["created"], r["author"], time.time()) for r in rows])
+        c.commit()
+
+
+def expenses_report(d1, d2, fresh=False):
+    key = (d1, d2)
+    hit = SD_CACHE.get(key)
+    err = None
+    if fresh or not hit or time.time() - hit[0] > 120:
+        try:
+            rows = sd_fetch(d1, d2)
+            rows = [r for r in rows if d1 <= r["date"] <= d2]
+            sd_store(d1, d2, rows)
+            SD_CACHE[key] = hit = (time.time(), rows)
+        except SalesDocError as e:
+            err = str(e)
+    if hit and not err:
+        at, rows = hit
+    else:
+        rows = db.q("SELECT id, date, fund, article, cashbox, amount, currency, comment, created, author "
+                    "FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date, id", (d1, d2))
+        f = db.q("SELECT MAX(fetched) AS f FROM expenses WHERE date BETWEEN ? AND ?", (d1, d2))
+        at = f[0]["f"] if f and f[0]["f"] else None
+        if err:
+            err += (" Oxirgi saqlangan ma'lumot ko'rsatilmoqda." if rows else "")
+    rows = sorted(rows, key=lambda r: (r["date"], r["id"]), reverse=True)
+    return {"connected": True, "from": d1, "to": d2, "rows": rows, "error": err,
+            "fetched": fmt_time(datetime.fromtimestamp(at)) if at else None}
+
+
+def sd_public():
+    c = sd_cfg()
+    return {"connected": bool(c["username"] and c["password"]), "host": c["host"], "username": c["username"],
+            "connected_at": c["connected_at"]}
+
+
+def sd_save(b):
+    if b.get("disconnect"):
+        CFG["salesdoc"] = {}
+        save_config(CFG)
+        SD_SESS.update(cookies={}, user=None, host=None)
+        SD_CACHE.clear()
+        return 200, {"ok": True, **sd_public()}
+    host = str(b.get("host") or "rafiq.salesdoc.io").strip().lower()
+    host = re.sub(r"^https?://", "", host).split("/")[0]
+    user = str(b.get("username") or "").strip()
+    pw = str(b.get("password") or "")
+    if not re.fullmatch(r"[a-z0-9-]+\.salesdoc\.io", host):
+        return 400, {"error": "Manzil noto'g'ri. Masalan: rafiq.salesdoc.io"}
+    if not user or len(user) > 128:
+        return 400, {"error": "SalesDoc loginini kiriting"}
+    if not pw:
+        if sd_cfg()["password"] and sd_cfg()["username"] == user and sd_cfg()["host"] == host:
+            pw = sd_cfg()["password"]
+        else:
+            return 400, {"error": "SalesDoc parolini kiriting"}
+    if len(pw) > 256:
+        return 400, {"error": "Parol juda uzun"}
+    cookies = sd_login(host, user, pw)
+    st, _, _, page = _sd_http(host, "GET", "/finans/consumption?dateType=DATE", cookies=cookies, timeout=90)
+    if st != 200 or _sd_is_login(page):
+        raise SalesDocError("SalesDoc'ga kirildi, lekin rasxodlar sahifasi ochilmadi — bu foydalanuvchida "
+                            "«Расходы» bo'limiga ruxsat bormi?")
+    sd_parse(page)
+    CFG["salesdoc"] = {"host": host, "username": user, "password": pw, "connected_at": fmt_time(now_local())}
+    save_config(CFG)
+    with SD_LOCK:
+        SD_SESS.update(cookies=cookies, user=user, host=host)
+    SD_CACHE.clear()
+    return 200, {"ok": True, **sd_public()}
+
+
 # ----------------------------------------------------------------- dashboard foydalanuvchilari
 SESSION_DAYS = 30
 FAILS = {}
@@ -2077,6 +2338,8 @@ def restore_backup(raw):
         db = DB(os.path.join(DATA, "attendance.db"))
         BILLZ_AUTH.update(token=None, at=0, secret=None)
         BILLZ_CACHE.clear()
+        SD_SESS.update(cookies={}, user=None, host=None)
+        SD_CACHE.clear()
         for t in terminals(with_password=True):
             start_poller(t)
     print(f"Zaxiradan tiklandi: {len(names)} ta fayl", flush=True)
@@ -2490,6 +2753,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, stock_report() if p.endswith("stock") else debts_report())
                 except BillzError as e:
                     return self.send(200, {"connected": True, "error": str(e)})
+            if p == "/api/salesdoc":
+                return self.send(200, sd_public())
+            if p == "/api/expenses":
+                if not sd_public()["connected"]:
+                    return self.send(200, {"connected": False})
+                d1 = qs.get("from") or today
+                d2 = qs.get("to") or d1
+                if not (re.fullmatch(r"\d{4}-\d{2}-\d{2}", d1) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d2)) or d2 < d1:
+                    return self.send(400, {"error": "Sana noto'g'ri"})
+                if (datetime.strptime(d2, "%Y-%m-%d") - datetime.strptime(d1, "%Y-%m-%d")).days > 400:
+                    return self.send(400, {"error": "Davr juda uzun (ko'pi bilan 1 yil)"})
+                return self.send(200, expenses_report(d1, d2, fresh=qs.get("fresh") == "1"))
             if p == "/api/users":
                 return self.send(200, {"users": db.q("SELECT username, created FROM accounts ORDER BY username"),
                                        "me": user})
@@ -2659,6 +2934,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(*autolink())
             if p == "/api/billz/link":
                 return self.send(*billz_link_seller(body))
+            if p == "/api/salesdoc/save":
+                try:
+                    return self.send(*sd_save(body))
+                except SalesDocError as e:
+                    return self.send(400, {"error": str(e)})
             if p == "/api/billz/save":
                 try:
                     return self.send(*billz_save(body))

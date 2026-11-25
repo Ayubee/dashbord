@@ -332,7 +332,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
   .side{position:fixed;top:auto;left:max(10px,env(safe-area-inset-left));right:max(10px,env(safe-area-inset-right));bottom:max(10px,env(safe-area-inset-bottom));
     height:auto;width:auto;flex-direction:row;justify-content:space-between;padding:6px;gap:2px;border-radius:24px;overflow:visible}
   .side .logo,.side .sp{display:none}
-  .nav{flex:1 1 0;min-width:44px;max-width:64px;height:50px;border-radius:18px}
+  .nav{flex:1 1 0;min-width:34px;max-width:64px;height:50px;border-radius:18px}
   .nav svg{width:22px;height:22px}
   .nav .tip{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;opacity:0}
   .nav .badge-n{top:5px;right:calc(50% - 20px)}
@@ -426,6 +426,26 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
   .stk-match td:nth-child(5){grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;text-align:left!important;white-space:normal!important}
   .stk-match td:nth-child(5):empty{display:none}
   .stk-match td:nth-child(5) .btn{flex:1}
+  /* rasxodlar: fond + summa | statya + sana | izoh */
+  .stk-exp thead,.stk-art thead{display:none}
+  .stk-exp tbody,.stk-art tbody{display:flex;flex-direction:column;gap:8px;padding:2px 0}
+  .stk-exp tr,.stk-art tr{display:grid;gap:6px 10px;align-items:center;padding:12px 14px;border-radius:18px;background:var(--row);grid-template-columns:minmax(0,1fr) auto}
+  .stk-exp td,.stk-art td{display:block;padding:0;background:none!important;border-radius:0!important;white-space:normal!important;min-width:0;max-width:none!important}
+  .stk-exp tr.empty,.stk-art tr.empty{display:block;background:var(--row-a)}
+  .stk-exp tr.empty td,.stk-art tr.empty td{padding:22px 8px;text-align:center}
+  .stk-exp td:nth-child(2){grid-column:1;grid-row:1}
+  .stk-exp td:nth-child(4){grid-column:2;grid-row:1;text-align:right}
+  .stk-exp td:nth-child(3){grid-column:1;grid-row:2}
+  .stk-exp td:nth-child(1){grid-column:2;grid-row:2;text-align:right;font-size:12.5px}
+  .stk-exp td:nth-child(5){grid-column:1/-1;grid-row:3;font-size:13px;color:var(--muted)}
+  .stk-exp td:nth-child(5):empty{display:none}
+  .stk-art td:nth-child(1){grid-column:1;grid-row:1}
+  .stk-art td:nth-child(4){grid-column:2;grid-row:1;text-align:right}
+  .stk-art td:nth-child(2){grid-column:1;grid-row:2}
+  .stk-art td:nth-child(3){grid-column:2;grid-row:2;text-align:right;font-size:12.5px}
+  .stk-art td:nth-child(3)::after{content:" ta"}
+  .stk-art td:nth-child(5){grid-column:1/-1;grid-row:3}
+  #exFund,#exArt{flex:1 1 160px;min-width:0}
   /* sozlamalar: bo'limlar — gorizontal chiplar qatori */
   .sgrid{gap:12px}
   .snav{background:none;border:0;box-shadow:none;border-radius:0;padding:2px 16px;margin:0 -16px;gap:8px;scroll-padding:0 16px}
@@ -493,6 +513,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
     <button class="nav active" data-nav="day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8 16v-4M12 16V8M16 16v-6"/></svg><span class="tip">Kunlik davomat</span></button>
     <button class="nav" data-nav="month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16.5" rx="4"/><path d="M3 10h18M8 2.5v4M16 2.5v4M8 14h2M14 14h2M8 17.5h2"/></svg><span class="tip">Oylik tabel</span></button>
     <button class="nav" data-nav="sales"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14l-1.3 11.1a2 2 0 0 1-2 1.9H8.3a2 2 0 0 1-2-1.9z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg><span class="tip">Savdo (BILLZ)</span></button>
+    <button class="nav" data-nav="exp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v4"/><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M16 13.5h.01"/><path d="M4 9.5h16"/></svg><span class="tip">Rasxodlar (SalesDoc)</span></button>
     <button class="nav" data-nav="excel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/></svg><span class="tip">Hisobot (Excel)</span></button>
     <button class="nav" data-nav="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><i class="badge-n" id="navUnl" hidden></i><span class="tip">Sozlamalar</span></button>
     <span class="sp"></span>
@@ -563,6 +584,23 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
       <div id="salesBody"></div>
     </div>
 
+    <!-- ===== RASXODLAR (SalesDoc) ===== -->
+    <div id="viewExp" hidden>
+      <div class="banner warn" id="exNot" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>SalesDoc hali ulanmagan. <a id="exGo">Sozlamalar → SalesDoc</a> bo'limida SalesDoc login va parolini kiriting.</span></div>
+      <div class="toolbar">
+        <div class="seg" id="exPer"><button data-per="today">Bugun</button><button data-per="yday">Kecha</button><button data-per="week">7 kun</button><button data-per="month" class="on">Shu oy</button><button data-per="pmonth">O'tgan oy</button></div>
+        <input class="dinput" type="date" id="exFrom"><span class="muted">—</span><input class="dinput" type="date" id="exTo">
+        <select class="sel" id="exFund" title="Fond bo'yicha"><option value="">Hamma fondlar</option></select>
+        <select class="sel" id="exArt" title="Statya bo'yicha"><option value="">Hamma statyalar</option></select>
+        <span class="sp"></span>
+        <span class="muted" id="exUpd"></span>
+        <button class="link" id="exRefresh">↻ Yangilash</button>
+      </div>
+      <div class="banner warn" id="exErr" hidden></div>
+      <div id="expBody"></div>
+    </div>
+
     <!-- ===== SOZLAMALAR ===== -->
     <div id="viewSettings" hidden>
       <div class="sgrid">
@@ -572,6 +610,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
           <button data-st="match">🔗 Moslash <span class="n" id="stUnl" hidden></span></button>
           <button data-st="telegram">✈️ Telegram bot <span class="n" id="stTg" hidden>!</span></button>
           <button data-st="billz">🛒 BILLZ</button>
+          <button data-st="salesdoc">💸 SalesDoc</button>
           <button data-st="accounts">🔑 Foydalanuvchilar</button>
           <button data-st="general">⏰ Ish vaqti</button>
           <button data-st="backup">💾 Zaxira</button>
@@ -716,6 +755,24 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
                 <button class="btn" id="bzBtn" type="submit">Ulash</button>
               </div>
               <div class="ferr" id="bzErr"></div><div class="okmsg" id="bzOk"></div>
+            </form>
+          </div>
+          <!-- salesdoc -->
+          <div data-pane="salesdoc" hidden>
+            <h2>SalesDoc ulanishi</h2><p class="desc">SalesDoc'dagi <b>Расходы</b> (rasxodlar) — fond, statya, summa va izoh — dashboardning <b>Rasxodlar</b> bo'limida ko'rsatiladi. Dashboard SalesDoc'dan faqat <b>o'qiydi</b>: u yerda hech narsani o'zgartirmaydi va o'chirmaydi.</p>
+            <div id="sdOn" hidden>
+              <ul class="ulist"><li><span style="font-size:18px">💸</span><b><span class="ok" style="font-weight:600">✓ SalesDoc ulangan</span> <span class="tp" id="sdInfo"></span></b>
+                <button class="btn danger sm" id="sdOff" type="button">Uzish</button></li></ul>
+            </div>
+            <form id="sdForm" style="max-width:560px" autocomplete="off">
+              <p class="muted" style="margin:0 0 12px;font-size:13px">SalesDoc saytiga qaysi login va parol bilan kirsangiz, shuni yozing. Rasxodlarni ko'rish ruxsati bo'lgan foydalanuvchi kerak. Parol faqat shu dashboard serverida saqlanadi.</p>
+              <label class="field"><span>SalesDoc manzili</span><input id="sdHost" value="rafiq.salesdoc.io" autocapitalize="off" spellcheck="false" placeholder="rafiq.salesdoc.io"></label>
+              <div class="row2">
+                <label class="field"><span>Login</span><input id="sdUser" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="SalesDoc logini"></label>
+                <label class="field"><span id="sdPassLbl">Parol</span><input id="sdPass" type="password" autocomplete="new-password" placeholder="SalesDoc paroli"></label>
+              </div>
+              <button class="btn" id="sdBtn" type="submit">Ulash</button>
+              <div class="ferr" id="sdErr"></div><div class="okmsg" id="sdOk"></div>
             </form>
           </div>
           <!-- umumiy -->
@@ -905,15 +962,16 @@ $$(".side .nav[data-nav]").forEach(b => b.onclick = () => {
   if (n === "excel") return openExcel();
   if (n === "settings") return showSettings();
   if (n === "sales") return showSales();
+  if (n === "exp") return showExp();
   showDash(n);
 });
 function showDash(m){
-  view = "dash"; $("viewDash").hidden = false; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("searchChip").hidden = false;
+  view = "dash"; $("viewDash").hidden = false; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("viewExp").hidden = true; $("searchChip").hidden = false;
   $("pageTitle").textContent = "Davomat (Face ID)";
   if (m) setMode(m); else setNav(mode);
 }
 function showSettings(tab){
-  view = "settings"; $("viewDash").hidden = true; $("viewSettings").hidden = false; $("viewSales").hidden = true; $("searchChip").hidden = true;
+  view = "settings"; $("viewDash").hidden = true; $("viewSettings").hidden = false; $("viewSales").hidden = true; $("viewExp").hidden = true; $("searchChip").hidden = true;
   $("pageTitle").textContent = "Sozlamalar"; setNav("settings");
   openTab(tab || curTab);
 }
@@ -1059,7 +1117,7 @@ $("date").onchange = () => { viewDate = $("date").value || today; load(); };
 $("month").onchange = () => { viewMonth = $("month").value || today.slice(0,7); load(); };
 $("tfilter").onchange = () => { tid = $("tfilter").value; load(); };
 $("refresh").onclick = () => { pollState(); load(); };
-$("q").oninput = () => view === "sales" ? renderSales() : mode === "day" ? renderDay() : renderMonth();
+$("q").oninput = () => view === "sales" ? renderSales() : view === "exp" ? renderExp() : mode === "day" ? renderDay() : renderMonth();
 $("unlLink").onclick = () => showSettings("match");
 
 /* ---------- xodim rasmlari */
@@ -1093,7 +1151,7 @@ const short = n => { n = n || 0; const a = Math.abs(n);
   return a >= 1e9 ? (n/1e9).toFixed(2).replace(/\.?0+$/, "") + " mlrd" : a >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/, "") + " mln" : sum(n); };
 const qty = n => (Math.round((n || 0) * 100) / 100).toLocaleString("ru-RU").replace(/[ ,]/g, " ");
 function showSales(){
-  view = "sales"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = false; $("searchChip").hidden = false;
+  view = "sales"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = false; $("viewExp").hidden = true; $("searchChip").hidden = false;
   $("pageTitle").textContent = "Savdo (BILLZ)"; setNav("sales");
   if (!$("sFrom").value) setPer(per, true);
   loadSales();
@@ -1228,6 +1286,115 @@ function renderDebts(d, box){
     </tbody></table></div></div>`;
 }
 
+/* ================= RASXODLAR (SalesDoc) ================= */
+let ED = null, exPer = "month";
+const curOf = c => { c = c || "";
+  if (/доллар|usd|\$/i.test(c)) return {k: "usd", t: "$"};
+  if (/безнал/i.test(c)) return {k: "bank", t: "so'm · bank"};
+  if (/налич/i.test(c)) return {k: "naqd", t: "so'm · naqd"};
+  if (/cli/i.test(c)) return {k: "click", t: "so'm · Click"};
+  return {k: c, t: c}; };
+const ddmm = d => d ? d.slice(8,10) + "." + d.slice(5,7) + "." + d.slice(0,4) : "";
+function showExp(){
+  view = "exp"; $("viewDash").hidden = true; $("viewSettings").hidden = true; $("viewSales").hidden = true; $("viewExp").hidden = false; $("searchChip").hidden = false;
+  $("pageTitle").textContent = "Rasxodlar"; setNav("exp");
+  if (!$("exFrom").value) setExPer(exPer || "month", true);
+  loadExp();
+}
+function setExPer(p, quiet){
+  exPer = p; $$("#exPer button").forEach(b => b.classList.toggle("on", b.dataset.per === p));
+  let a = today, b = today;
+  if (p === "yday") a = b = addDays(today, -1);
+  if (p === "week") a = addDays(today, -6);
+  if (p === "month") a = today.slice(0, 7) + "-01";
+  if (p === "pmonth"){ b = addDays(today.slice(0, 7) + "-01", -1); a = b.slice(0, 7) + "-01"; }
+  $("exFrom").value = a; $("exTo").value = b;
+  if (!quiet) loadExp();
+}
+$$("#exPer button").forEach(b => b.onclick = () => setExPer(b.dataset.per));
+for (const id of ["exFrom", "exTo"]) $(id).onchange = () => { exPer = ""; $$("#exPer button").forEach(b => b.classList.remove("on"));
+  if ($("exTo").value < $("exFrom").value) $("exTo").value = $("exFrom").value; loadExp(); };
+$("exFund").onchange = () => { $("exArt").value = ""; renderExp(); };
+$("exArt").onchange = () => renderExp();
+$("exRefresh").onclick = () => loadExp(true);
+$("exGo").onclick = () => showSettings("salesdoc");
+let expSeq = 0;
+async function loadExp(fresh){
+  const seq = ++expSeq;
+  $("exUpd").textContent = "Yuklanmoqda…";
+  try{
+    const d = await j(`/api/expenses?from=${$("exFrom").value}&to=${$("exTo").value}${fresh ? "&fresh=1" : ""}`);
+    if (seq !== expSeq) return;
+    ED = d;
+    $("exNot").hidden = d.connected !== false;
+    $("exErr").hidden = !d.error; $("exErr").textContent = d.error || "";
+    $("exUpd").textContent = d.fetched ? `SalesDoc: ${hm(d.fetched)}` : "";
+    renderExp();
+  }catch(e){ if (seq === expSeq){ $("exUpd").textContent = ""; $("exErr").hidden = false; $("exErr").textContent = e.message; } }
+}
+function fillSel(id, first, vals){
+  const el = $(id), v = el.value;
+  const html = `<option value="">${first}</option>` + vals.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("");
+  if (el.dataset.sig !== html){ el.innerHTML = html; el.dataset.sig = html; }
+  el.value = vals.includes(v) ? v : "";
+}
+function renderExp(){
+  const d = ED, box = $("expBody");
+  if (!d || d.connected === false){ box.innerHTML = ""; return; }
+  const all = d.rows || [];
+  const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y));
+  fillSel("exFund", "Hamma fondlar", uniq(all.map(r => r.fund)));
+  const fund = $("exFund").value;
+  fillSel("exArt", "Hamma statyalar", uniq(all.filter(r => !fund || r.fund === fund).map(r => r.article)));
+  const art = $("exArt").value;
+  const rows = all.filter(r => (!fund || r.fund === fund) && (!art || r.article === art) && qm(r.fund, r.article, r.comment, r.author));
+  const som = rows.filter(r => curOf(r.currency).k !== "usd"), usd = rows.filter(r => curOf(r.currency).k === "usd");
+  const tot = som.reduce((a, r) => a + r.amount, 0), totUsd = usd.reduce((a, r) => a + r.amount, 0);
+  const group = (list, key) => { const m = new Map(); for (const r of list){ const k = key(r); const g = m.get(k) || {name: k, total: 0, n: 0}; g.total += r.amount; g.n++; m.set(k, g); }
+    return [...m.values()].sort((a, b) => b.total - a.total); };
+  const SEP = "\u0001";
+  const funds = group(som, r => r.fund || "—");
+  const pays = group(som, r => curOf(r.currency).t);
+  const arts = group(som, r => (r.fund || "—") + SEP + (r.article || "—"));
+  const days = Math.round((new Date(d.to) - new Date(d.from)) / 864e5) + 1;
+  const range = d.from === d.to ? uzDate(d.from) : `${d.from.slice(8,10)}.${d.from.slice(5,7)} — ${ddmm(d.to)}`;
+  const byDay = new Map(); for (const r of som) byDay.set(r.date, (byDay.get(r.date) || 0) + r.amount);
+  const series = []; for (let i = 0; i < days && days > 1; i++){ const t = addDays(d.from, i); series.push({t, v: byDay.get(t) || 0}); }
+  const max = Math.max(1, ...series.map(p => p.v)), step = Math.ceil(series.length / 12);
+  const bars = series.map((p, i) => `<div class="b" title="${ddmm(p.t)} — ${sum(p.v)} so'm"><i style="height:${p.v / max * 100}%;background:var(--orange)"></i><small>${i % step ? "" : p.t.slice(8,10) + "." + p.t.slice(5,7)}</small></div>`).join("");
+  const flist = `<ul class="hl">${funds.map(r => `<li data-fund="${esc(r.name)}" style="cursor:pointer" title="${esc(r.name)} — ${r.n} ta yozuv"><span>${esc(r.name)}</span><b>${short(r.total)}</b><div class="tr"><i style="width:${tot ? Math.max(1, r.total / tot * 100) : 0}%;background:var(--orange)"></i></div></li>`).join("") || '<li class="muted">—</li>'}</ul>`;
+  const big = funds[0];
+  box.innerHTML = `
+    <div class="stats">
+      <div class="card stat" style="color:var(--orange)"><div class="l">Jami rasxod · ${esc(range)}</div><div class="v sm">${short(tot)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--teal)"><div class="l">Yozuvlar soni</div><div class="v sm">${sum(rows.length)}</div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--lime)"><div class="l">${totUsd ? "Dollarda" : "Kuniga o'rtacha"}</div><div class="v sm">${totUsd ? "$" + qty(totUsd) : short(tot / days)}${totUsd ? "" : "<small>so'm</small>"}</div><div class="bar"><b style="width:100%"></b></div></div>
+      <div class="card stat" style="color:var(--red)"><div class="l">Eng katta fond</div><div class="v sm" style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(big ? big.name : "")}">${big ? esc(big.name) : "—"}</div><div class="sub" style="margin-top:6px">${big ? short(big.total) + " so'm · " + Math.round(big.total / (tot || 1) * 100) + "%" : ""}</div></div>
+    </div>
+    <div class="sg2">
+      <div class="card pad">${days > 1 ? `<div class="ct">Kunlar bo'yicha rasxod<b>${sum(tot)} so'm</b></div><div class="chart">${bars}</div>`
+        : `<div class="ct">Statyalar<b>${sum(tot)} so'm</b></div>${hlist(arts.slice(0, 12).map(a => ({name: a.name.split(SEP)[1] + " · " + a.name.split(SEP)[0], total: a.total})), tot)}`}</div>
+      <div class="col">
+        <div class="card pad"><div class="ct">Fondlar${fund ? ` <a class="link" id="exAllF" style="margin-left:6px">hammasi</a>` : ""}</div>${flist}</div>
+        <div class="card pad"><div class="ct">To'lov turi</div>${hlist(pays, tot)}</div>
+      </div>
+    </div>
+    <div class="secttl">Fond va statyalar bo'yicha</div>
+    <div class="card tablecard"><div class="tablewrap"><table class="stk-art"><thead><tr><th>Fond</th><th>Statya</th><th>Soni</th><th>Summa</th><th>Ulushi</th></tr></thead><tbody>
+      ${arts.map(a => { const [f, s2] = a.name.split(SEP); return `<tr><td>${tpill(f)}</td><td>${esc(s2)}</td><td class="num muted">${a.n}</td><td class="num strong">${sum(a.total)} so'm</td>
+        <td><div class="share"><div class="tr"><i style="width:${tot ? a.total / tot * 100 : 0}%;background:var(--orange)"></i></div><small class="muted">${tot ? Math.round(a.total / tot * 100) : 0}%</small></div></td></tr>`; }).join("")
+        || '<tr class="empty"><td colspan="5">Bu davrda rasxod yo\'q</td></tr>'}
+    </tbody></table></div></div>
+    <div class="secttl">Hamma rasxodlar <span class="muted" style="font-size:13px">(${rows.length} ta)</span></div>
+    <div class="card tablecard"><div class="tablewrap"><table class="stk-exp"><thead><tr><th>Sana</th><th>Fond</th><th>Statya</th><th>Summa</th><th>Izoh</th></tr></thead><tbody>
+      ${rows.map(r => { const c = curOf(r.currency); return `<tr><td class="num muted">${ddmm(r.date)}</td><td>${tpill(r.fund)}</td><td>${esc(r.article)}</td>
+        <td class="num strong">${c.k === "usd" ? "$" + qty(r.amount) : sum(r.amount)}<small>${c.k === "usd" ? "dollar" : esc(c.t)}</small></td><td style="white-space:normal;max-width:420px">${esc(r.comment)}</td></tr>`; }).join("")
+        || `<tr class="empty"><td colspan="5">${all.length ? "Filtrga mos rasxod yo'q" : "Bu davrda rasxod yo'q"}</td></tr>`}
+    </tbody></table></div></div>`;
+  box.querySelectorAll("li[data-fund]").forEach(li => li.onclick = () => { $("exFund").value = li.dataset.fund; $("exArt").value = ""; renderExp(); });
+  const af = $("exAllF"); if (af) af.onclick = () => { $("exFund").value = ""; $("exArt").value = ""; renderExp(); };
+}
+
 /* ================= SOZLAMALAR ================= */
 let curTab = "terminals", ST = null;
 $$(".snav button").forEach(b => b.onclick = () => openTab(b.dataset.st));
@@ -1235,7 +1402,7 @@ function openTab(t){
   curTab = t;
   $$(".snav button").forEach(b => b.classList.toggle("on", b.dataset.st === t));
   $$("[data-pane]").forEach(p => p.hidden = p.dataset.pane !== t);
-  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, accounts: loadUsers, general: loadGeneral, backup: () => {}})[t]?.();
+  ({terminals: loadTerms, staff: loadStaff, match: loadStaff, telegram: loadTg, billz: loadBz, salesdoc: loadSd, accounts: loadUsers, general: loadGeneral, backup: () => {}})[t]?.();
 }
 
 /* --- terminallar */
@@ -1617,6 +1784,30 @@ $("bzForm").onsubmit = async ev => {
 $("bzOff").onclick = async () => {
   if (!confirm("BILLZ ulanishini uzasizmi? (Kalit o'chiriladi, BILLZ'dagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
   paintBz(await post("/api/billz/save", {disconnect: true}));
+};
+
+/* --- salesdoc */
+function paintSd(d){
+  $("sdOn").hidden = !d.connected;
+  $("sdInfo").textContent = [d.username ? d.username + " @ " + d.host : "", d.connected_at ? "· ulangan: " + fmtDT(d.connected_at) : ""].filter(Boolean).join(" ");
+  if (d.host) $("sdHost").value = d.host;
+  if (d.username && !$("sdUser").value) $("sdUser").value = d.username;
+  $("sdPassLbl").textContent = d.connected ? "Parol (saqlangan — almashtirish uchun yangisini yozing)" : "Parol";
+  $("sdBtn").textContent = d.connected ? "Saqlash" : "Ulash";
+}
+async function loadSd(){ paintSd(await j("/api/salesdoc")); }
+$("sdForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("sdErr", "");
+  const username = $("sdUser").value.trim(), password = $("sdPass").value, host = $("sdHost").value.trim();
+  if (!username) return showErr("sdErr", "Loginni kiriting");
+  const b = $("sdBtn"), txt = b.textContent; b.disabled = true; b.textContent = "Tekshirilmoqda…";
+  try{ const d = await post("/api/salesdoc/save", {host, username, password}); $("sdPass").value = ""; paintSd(d); showOk("sdOk", "✓ SalesDoc ulandi — Rasxodlar bo'limini oching"); ED = null; }
+  catch(e){ showErr("sdErr", e.message); b.textContent = txt; }
+  finally{ b.disabled = false; }
+};
+$("sdOff").onclick = async () => {
+  if (!confirm("SalesDoc ulanishini uzasizmi? (Login/parol dashboarddan o'chiriladi, SalesDoc'dagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
+  paintSd(await post("/api/salesdoc/save", {disconnect: true})); $("sdUser").value = "";
 };
 
 /* --- ish vaqti */
