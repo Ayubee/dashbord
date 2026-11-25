@@ -1251,44 +1251,68 @@ def _fetch_orders(d):
     return orders
 
 
-def _agg_day(d, orders):
-    a = {"date": d, "total": 0, "checks": 0, "refunds": 0, "exchanges": 0, "items": 0, "hours": [0] * 24,
+AGG_V = 2
+PAY_NAMES = {"наличные": "Naqd", "naqd": "Naqd", "cash": "Naqd", "uzcard": "Uzcard", "humo": "Humo",
+             "clic": "Click", "click": "Click", "payme": "Payme"}
+
+
+def _pay_name(n):
+    return PAY_NAMES.get((n or "").strip().lower(), n or "—")
+
+
+def _agg_new(d=None):
+    a = {"total": 0, "checks": 0, "refunds": 0, "exchanges": 0, "items": 0, "hours": [0] * 24,
          "shops": {}, "payments": {}, "sellers": {}, "products": {}}
+    if d:
+        a.update(date=d, v=AGG_V, by_shop={})
+    return a
+
+
+def _agg_day(d, orders):
+    top = _agg_new(d)
     for o in orders:
         od = o.get("order_detail") or {}
-        typ = o.get("order_type") or ""
-        tp = od.get("total_price") or 0
-        a["total"] += tp
-        if typ == "SALE":
-            a["checks"] += 1
-        elif typ == "RETURN":
-            a["refunds"] += 1
-        elif typ == "EXCHANGE":
-            a["exchanges"] += 1
-        ts = o.get("display_sold_at") or od.get("created_at") or o.get("created_at") or ""
-        if len(ts) >= 13 and ts[11:13].isdigit():
-            a["hours"][int(ts[11:13]) % 24] += tp
         shop = (od.get("shop") or {}).get("name") or "—"
-        a["shops"][shop] = a["shops"].get(shop, 0) + tp
-        for p in od.get("order_payments") or []:
-            n = (p.get("company_payment_type") or {}).get("name") or "—"
-            a["payments"][n] = a["payments"].get(n, 0) + (p.get("paid_amount") or 0) - (p.get("returned_amount") or 0)
-        for it in od.get("order_items") or []:
-            itp = it.get("total_price") or 0
-            mv = it.get("measurement_value") or 0
-            sellers = [s.get("seller", {}).get("name") or "" for s in it.get("sellers") or []] or \
-                [(od.get("user") or {}).get("name") or "—"]
-            for sname in sellers:
-                a["sellers"][sname or "—"] = a["sellers"].get(sname or "—", 0) + itp / len(sellers)
-            pr = it.get("product") or {}
-            pid = it.get("product_id") or pr.get("id") or pr.get("name")
-            if pid:
-                cur = a["products"].setdefault(pid, [pr.get("name") or it.get("name") or "—", 0, 0])
-                cur[1] += -mv if itp < 0 else mv
-                cur[2] += itp
-            if itp > 0:
-                a["items"] += mv
-    return a
+        for a in (top, top["by_shop"].setdefault(shop, _agg_new())):
+            _agg_order(a, o, od, shop)
+    return top
+
+
+def _agg_order(a, o, od, shop):
+    typ = o.get("order_type") or ""
+    tp = od.get("total_price") or 0
+    a["total"] += tp
+    if typ == "SALE":
+        a["checks"] += 1
+    elif typ == "RETURN":
+        a["refunds"] += 1
+    elif typ == "EXCHANGE":
+        a["exchanges"] += 1
+    ts = o.get("display_sold_at") or od.get("created_at") or o.get("created_at") or ""
+    if len(ts) >= 13 and ts[11:13].isdigit():
+        a["hours"][int(ts[11:13]) % 24] += tp
+    a["shops"][shop] = a["shops"].get(shop, 0) + tp
+    for p in od.get("order_payments") or []:
+        n = _pay_name((p.get("company_payment_type") or {}).get("name"))
+        a["payments"][n] = a["payments"].get(n, 0) + (p.get("paid_amount") or 0) - (p.get("returned_amount") or 0)
+    debt = (o.get("debt") or {}).get("amount") or 0 if isinstance(o.get("debt"), dict) else 0
+    if debt:
+        a["payments"]["Qarz"] = a["payments"].get("Qarz", 0) + debt
+    for it in od.get("order_items") or []:
+        itp = it.get("total_price") or 0
+        mv = it.get("measurement_value") or 0
+        sellers = [s.get("seller", {}).get("name") or "" for s in it.get("sellers") or []] or \
+            [(od.get("user") or {}).get("name") or "—"]
+        for sname in sellers:
+            a["sellers"][sname or "—"] = a["sellers"].get(sname or "—", 0) + itp / len(sellers)
+        pr = it.get("product") or {}
+        pid = it.get("product_id") or pr.get("id") or pr.get("name")
+        if pid:
+            cur = a["products"].setdefault(pid, [pr.get("name") or it.get("name") or "—", 0, 0])
+            cur[1] += -mv if itp < 0 else mv
+            cur[2] += itp
+        if itp > 0:
+            a["items"] += mv
 
 
 DAY_LOCK = threading.Lock()
@@ -1301,7 +1325,9 @@ def billz_day(d):
         return _agg_day(d, [])
     r = db.q("SELECT data, fetched, final FROM billz_days WHERE date=?", (d,))
     if r and (r[0]["final"] or time.time() - r[0]["fetched"] < 60):
-        return json.loads(r[0]["data"])
+        a = json.loads(r[0]["data"])
+        if a.get("v", 1) >= AGG_V:
+            return a
     a = _agg_day(d, _fetch_orders(d))
     final = 1 if d < today and now_local().hour >= 1 else 0     # o'tgan kun — endi o'zgarmaydi
     db.x("INSERT OR REPLACE INTO billz_days(date, data, fetched, final) VALUES(?,?,?,?)",
@@ -1309,7 +1335,7 @@ def billz_day(d):
     return a
 
 
-def sales_report(d1, d2):
+def sales_report(d1, d2, shop=None):
     one_day = d1 == d2
     days = []
     x = datetime.fromisoformat(d1)
@@ -1318,7 +1344,26 @@ def sales_report(d1, d2):
         x += timedelta(days=1)
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(4) as ex:
-        aggs = list(ex.map(billz_day, days))
+        full = list(ex.map(billz_day, days))
+    sd = {}
+    for a in full:
+        for name, b in (a.get("by_shop") or {}).items():
+            x = sd.setdefault(name, {"name": name, "total": 0, "checks": 0, "refunds": 0, "items": 0, "payments": {},
+                                     "days": {}})
+            for k in ("total", "checks", "refunds", "items"):
+                x[k] += b[k]
+            for k, v in b["payments"].items():
+                x["payments"][k] = x["payments"].get(k, 0) + v
+            x["days"][a["date"]] = b["total"]
+    shops_detail = sorted(sd.values(), key=lambda x: -x["total"])
+    for x in shops_detail:
+        x["series"] = [{"t": d, "v": x["days"].get(d, 0)} for d in days]
+        del x["days"]
+        x["payments"] = [{"name": k, "total": v} for k, v in sorted(x["payments"].items(), key=lambda kv: -kv[1])]
+    if shop:
+        aggs = [{**_agg_new(), **((a.get("by_shop") or {}).get(shop) or {}), "date": a["date"]} for a in full]
+    else:
+        aggs = full
     total = sum(a["total"] for a in aggs)
     merge = lambda key: {k: sum(a[key].get(k, 0) for a in aggs) for a2 in aggs for k in a2[key]}
     shops, payments, sellers_sum = merge("shops"), merge("payments"), merge("sellers")
@@ -1368,6 +1413,7 @@ def sales_report(d1, d2):
             "payments": [{"name": k, "total": v} for k, v in sorted(payments.items(), key=lambda kv: -kv[1])],
             "sellers": sellers,
             "products": [{"name": n, "qty": q, "total": s} for n, q, s in top],
+            "shop": shop, "shops_detail": shops_detail,
             "staff": [{"id": sid, "name": s["name"]} for sid, s in sorted(ctx["staff"].items(), key=lambda kv: kv[1]["name"])],
             "fetched": fmt_time(now_local())}
 
@@ -1485,7 +1531,7 @@ def billz_link_seller(b):
 def billz_public():
     c = billz_cfg()
     return {"connected": bool(c["secret"]), "company": c["company"], "connected_at": c["connected_at"],
-            "secret_hint": ("…" + c["secret"][-4:]) if c["secret"] else ""}
+            "secret_hint": ("…" + c["secret"][-4:]) if c["secret"] else "", "panel": bzp_public()}
 
 
 def billz_save(b):
@@ -1493,6 +1539,8 @@ def billz_save(b):
         CFG["billz"] = {}
         save_config(CFG)
         BILLZ_AUTH.update(token=None, secret=None)
+        BZP_AUTH.update(token=None, key=None)
+        BZX_CACHE.clear()
         return 200, {"ok": True, **billz_public()}
     secret = str(b.get("secret") or "").strip()
     if not secret or len(secret) < 20 or len(secret) > 4096 or any(ch.isspace() for ch in secret):
@@ -1510,6 +1558,207 @@ def billz_save(b):
     save_config(CFG)
     BILLZ_AUTH.update(token=d["access_token"], at=time.time(), secret=secret)
     return 200, {"ok": True, **billz_public()}
+
+
+# ----------------------------------------------------------------- BILLZ rasxodlari (panel orqali, faqat o'qish)
+# BILLZ integratsiya kaliti moliya bo'limiga ruxsat bermaydi (403). Rasxodlar ("Moliyaviy tranzaksiyalar" →
+# Xarajat) panelning o'z API'sidan olinadi: server panelga foydalanuvchi telefon/paroli bilan kiradi.
+# Faqat GET so'rovlar — BILLZ'da hech narsa yaratilmaydi, o'zgartirilmaydi, o'chirilmaydi.
+BZP_LOCK = threading.Lock()
+BZP_AUTH = {"token": None, "key": None}
+BZX_CACHE = {}
+
+
+def bzp_cfg():
+    c = {"host": "rafiq.billz.io", "phone": "", "password": "", "device": "", "connected_at": None}
+    c.update(billz_cfg().get("panel") or {})
+    return c
+
+
+def _bzp_http(host, method, path, body=None, token=None, device=None, timeout=45):
+    hdr = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Davomat-dashboard"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        hdr["Content-Type"] = "application/json"
+    if token:
+        hdr["Authorization"] = f"Bearer {token}"
+    if device:
+        hdr["device-guid"] = device
+    try:
+        conn = http.client.HTTPSConnection(host, timeout=timeout)
+        try:
+            conn.request(method, "/api/" + path.lstrip("/"), data, hdr)
+            r = conn.getresponse()
+            raw = r.read()
+        finally:
+            conn.close()
+    except Exception as e:
+        raise BillzError(f"BILLZ paneliga ulanib bo'lmadi ({type(e).__name__}). Internetni tekshiring.")
+    try:
+        j = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception:
+        j = {"raw": raw[:300].decode("utf-8", "ignore")}
+    return r.status, j
+
+
+def _find_key(o, key, depth=0):
+    if isinstance(o, dict):
+        if isinstance(o.get(key), str) and o[key]:
+            return o[key]
+        for v in o.values():
+            if depth < 4:
+                x = _find_key(v, key, depth + 1)
+                if x:
+                    return x
+    return None
+
+
+def bzp_login(c):
+    cid = billz_cfg().get("company_id") or billz_company_id()
+    st, j = _bzp_http(c["host"], "POST", "v2/auth/web/login",
+                      {"company_id": cid, "password": c["password"], "phone": c["phone"]}, device=c["device"])
+    tok = _find_key(j, "access_token")
+    if st == 200 and tok:
+        return tok
+    txt = json.dumps(j, ensure_ascii=False)
+    if "MAX_DEVICES_LIMIT" in txt:
+        raise BillzError("BILLZ: bu foydalanuvchi uchun qurilmalar chegarasi to'lgan. BILLZ'da eski qurilmalardan "
+                         "birini chiqarib yuboring (yoki boshqa foydalanuvchi bilan kiring).")
+    if st in (400, 401, 403, 404, 422):
+        raise BillzError("BILLZ paneli telefon raqam yoki parolni qabul qilmadi. Panelga qanday kirsangiz, "
+                         "shunday yozing.")
+    raise BillzError(f"BILLZ paneliga kirib bo'lmadi ({st}).")
+
+
+def bzp_get(path, params):
+    c = bzp_cfg()
+    if not (c["phone"] and c["password"]):
+        raise BillzError("Rasxodlar uchun BILLZ panel logini kiritilmagan.")
+    key = (c["host"], c["phone"], c["password"])
+    q = path + "?" + urlencode(params)
+    with BZP_LOCK:
+        if BZP_AUTH["key"] != key or not BZP_AUTH["token"]:
+            BZP_AUTH.update(token=bzp_login(c), key=key)
+        st, j = _bzp_http(c["host"], "GET", q, token=BZP_AUTH["token"])
+        if st == 401:   # token eskirgan — qayta kiramiz
+            BZP_AUTH.update(token=bzp_login(c), key=key)
+            st, j = _bzp_http(c["host"], "GET", q, token=BZP_AUTH["token"])
+    if st == 403:
+        raise BillzError("Bu BILLZ foydalanuvchisida «Moliya → Tranzaksiyalar» bo'limini ko'rish ruxsati yo'q.")
+    if st != 200 or not isinstance(j, dict):
+        raise BillzError(f"BILLZ rasxodlarni bermadi ({st}).")
+    return j
+
+
+def _bz_s(v):
+    if isinstance(v, dict):
+        return v.get("String") or "" if v.get("Valid", True) else ""
+    return "" if v is None else str(v)
+
+
+def bzx_fetch(d1, d2):
+    rows, page = [], 1
+    while page <= 50:
+        j = bzp_get("v1/gl-transaction", {"search": "", "limit": 1000, "page": page, "start_date": d1, "end_date": d2,
+                                         "is_all_transactions": "true", "type": "expense"})
+        got = j.get("gl_transactions") or []
+        for t in got:
+            if _bz_s(t.get("operation_type_name")).lower() not in ("expense", ""):
+                continue
+            if str(t.get("status") or "").lower() in ("deleted", "canceled", "cancelled", "rejected"):
+                continue
+            cat = (t.get("category") or "—").strip()
+            fund, _, art = cat.partition(" / ")
+            cur = t.get("currency_name") or ""
+            pay = t.get("payment_method_name") or ""
+            created = str(t.get("created_at") or "")
+            rows.append({"id": t.get("external_id") or t.get("TxID"), "date": created[:10],
+                         "op_date": str(t.get("date_at") or "")[:10], "time": created[11:16],
+                         "fund": fund.strip() or "—", "article": art.strip() or "—",
+                         "shop": _bz_s(t.get("shop_name")), "cashbox": _bz_s(t.get("cashbox_name")),
+                         "amount": abs(float(t.get("amount") or 0)),
+                         "currency": "Доллар США" if cur.upper() == "USD" else (pay or cur),
+                         "comment": _bz_s(t.get("comment")), "author": t.get("created_by_user_name") or "",
+                         "person": t.get("user_name") or ""})
+        total = j.get("count") or 0
+        if len(got) < 1000 or page * 1000 >= total:
+            break
+        page += 1
+    return [r for r in rows if d1 <= r["date"] <= d2]
+
+
+def billz_expenses(d1, d2, fresh=False):
+    c = bzp_cfg()
+    if not (c["phone"] and c["password"]):
+        return {"connected": True, "need_panel": True, "from": d1, "to": d2, "rows": []}
+    key = (d1, d2)
+    hit = BZX_CACHE.get(key)
+    err = None
+    if fresh or not hit or time.time() - hit[0] > 120:
+        try:
+            BZX_CACHE[key] = hit = (time.time(), bzx_fetch(d1, d2))
+        except BillzError as e:
+            err = str(e)
+            if hit:
+                err += " Oxirgi olingan ma'lumot ko'rsatilmoqda."
+    rows = sorted(hit[1], key=lambda r: (r["date"], r["time"], str(r["id"])), reverse=True) if hit else []
+    return {"connected": True, "from": d1, "to": d2, "rows": rows, "error": err, "source": "billz",
+            "fetched": fmt_time(datetime.fromtimestamp(hit[0])) if hit else None}
+
+
+def bzp_public():
+    c = bzp_cfg()
+    ph = c["phone"]
+    return {"connected": bool(c["phone"] and c["password"]), "host": c["host"],
+            "phone": (ph[:4] + " ** *** " + ph[-4:-2] + " " + ph[-2:]) if len(ph) >= 9 else ph,
+            "connected_at": c["connected_at"]}
+
+
+def bzp_save(b):
+    if not billz_cfg()["secret"]:
+        return 400, {"error": "Avval BILLZ integratsiya kalitini ulang."}
+    bc = billz_cfg()
+    if b.get("disconnect"):
+        bc.pop("panel", None)
+        CFG["billz"] = bc
+        save_config(CFG)
+        BZP_AUTH.update(token=None, key=None)
+        BZX_CACHE.clear()
+        return 200, {"ok": True, **bzp_public()}
+    host = re.sub(r"^https?://", "", str(b.get("host") or "rafiq.billz.io").strip().lower()).split("/")[0]
+    if not re.fullmatch(r"[a-z0-9-]+\.billz\.io", host):
+        return 400, {"error": "Panel manzili noto'g'ri. Masalan: rafiq.billz.io"}
+    digits = re.sub(r"\D", "", str(b.get("phone") or ""))
+    if len(digits) == 9:
+        digits = "998" + digits
+    if not re.fullmatch(r"\d{11,13}", digits):
+        return 400, {"error": "Telefon raqamni to'liq yozing, masalan +998 90 123 45 67"}
+    phone = "+" + digits
+    pw = str(b.get("password") or "")
+    old = bzp_cfg()
+    if not pw:
+        if old["password"] and old["phone"] == phone and old["host"] == host:
+            pw = old["password"]
+        else:
+            return 400, {"error": "BILLZ panel parolini kiriting"}
+    if len(pw) > 256:
+        return 400, {"error": "Parol juda uzun"}
+    c = {"host": host, "phone": phone, "password": pw, "device": old["device"] or str(uuid.uuid4())}
+    tok = bzp_login(c)
+    st, j = _bzp_http(host, "GET", "v1/gl-transaction?" + urlencode(
+        {"limit": 1, "page": 1, "start_date": now_local().date().isoformat(), "is_all_transactions": "true",
+         "type": "expense"}), token=tok)
+    if st == 403:
+        raise BillzError("Kirildi, lekin bu foydalanuvchida «Moliya → Tranzaksiyalar» ni ko'rish ruxsati yo'q.")
+    if st != 200:
+        raise BillzError(f"Kirildi, lekin rasxodlar ochilmadi ({st}).")
+    bc["panel"] = {**c, "connected_at": fmt_time(now_local())}
+    CFG["billz"] = bc
+    save_config(CFG)
+    BZP_AUTH.update(token=tok, key=(host, phone, pw))
+    BZX_CACHE.clear()
+    return 200, {"ok": True, **bzp_public()}
 
 
 # ----------------------------------------------------------------- SalesDoc rasxodlari (faqat o'qish)
@@ -3230,16 +3479,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, tg_public())
             if p == "/api/billz":
                 return self.send(200, billz_public())
-            if p in ("/api/sales", "/api/sales/stock", "/api/sales/debts"):
+            if p in ("/api/sales", "/api/sales/stock", "/api/sales/debts", "/api/sales/expenses"):
                 if not billz_cfg()["secret"]:
                     return self.send(200, {"connected": False})
                 try:
+                    if p == "/api/sales/expenses":
+                        d1 = qs.get("from") or today
+                        d2 = qs.get("to") or d1
+                        if not (re.fullmatch(r"\d{4}-\d{2}-\d{2}", d1) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d2)) or d2 < d1:
+                            return self.send(400, {"error": "Sana noto'g'ri"})
+                        if (datetime.strptime(d2, "%Y-%m-%d") - datetime.strptime(d1, "%Y-%m-%d")).days > 400:
+                            return self.send(400, {"error": "Davr juda uzun (ko'pi bilan 1 yil)"})
+                        return self.send(200, billz_expenses(d1, d2, fresh=qs.get("fresh") == "1"))
                     if p == "/api/sales":
                         d1 = qs.get("from") or today
                         d2 = qs.get("to") or d1
                         if not (re.fullmatch(r"\d{4}-\d{2}-\d{2}", d1) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d2)) or d2 < d1:
                             return self.send(400, {"error": "Sana noto'g'ri"})
-                        return self.send(200, sales_report(d1, d2))
+                        return self.send(200, sales_report(d1, d2, (qs.get("shop") or "").strip()[:100] or None))
                     return self.send(200, stock_report() if p.endswith("stock") else debts_report())
                 except BillzError as e:
                     return self.send(200, {"connected": True, "error": str(e)})
@@ -3443,6 +3700,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return self.send(*sd_save(body))
                 except SalesDocError as e:
+                    return self.send(400, {"error": str(e)})
+            if p == "/api/billz/panel":
+                try:
+                    return self.send(*bzp_save(body))
+                except BillzError as e:
                     return self.send(400, {"error": str(e)})
             if p == "/api/billz/save":
                 try:

@@ -255,6 +255,19 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .sg2{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
 .sg2>.col{display:flex;flex-direction:column;gap:14px}
 .sg2.top{align-items:start}
+.shopgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.shopcard{cursor:pointer;transition:transform .15s,box-shadow .15s}
+.shopcard:hover{transform:translateY(-2px)}
+.shopcard:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.shead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:16px}
+.shead .muted{font-size:12px}
+.sbig{font-size:26px;font-weight:700;margin-top:8px;font-variant-numeric:tabular-nums}
+.sbig small{font-size:13px;font-weight:500;color:var(--muted)}
+.snet{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;padding-top:12px;margin-top:12px;border-top:1px solid var(--line)}
+.snet b{font-variant-numeric:tabular-nums;margin-left:4px}
+.smore{margin-top:12px;font-size:13px;font-weight:600;color:var(--teal)}
+.shopbar{display:flex;align-items:center;gap:14px;margin:0 0 14px;flex-wrap:wrap}
+.shopbar h2{margin:0;font-size:22px}
 :root{--mix1:#3987e5;--mix2:#d95926;--mix3:#199e70;--mix4:#c98500;--mix5:#d55181;--mix0:#5d6068}
 :root[data-theme="light"]{--mix1:#2a78d6;--mix2:#eb6834;--mix3:#1baf7a;--mix4:#eda100;--mix5:#e87ba4;--mix0:#b9bdc6}
 .mixbar{display:flex;gap:2px;height:44px;margin:4px 0 16px}
@@ -281,6 +294,8 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .hl li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 10px;font-size:13.5px}
 .hl li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hl li b{font-weight:600;font-variant-numeric:tabular-nums}
+.shopcard>.tr{height:6px;border-radius:3px;background:var(--g2);overflow:hidden}
+.shopcard>.tr i{display:block;height:100%;border-radius:3px;background:var(--teal)}
 .hl .tr{grid-column:1/-1;height:6px;border-radius:3px;background:var(--g2);overflow:hidden}
 .hl .tr i{display:block;height:100%;border-radius:3px;background:var(--teal)}
 .share{display:flex;align-items:center;gap:8px;min-width:120px}
@@ -442,6 +457,9 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
   .stk-match td:nth-child(5):empty{display:none}
   .stk-match td:nth-child(5) .btn{flex:1}
   /* rasxodlar: fond + summa | statya + sana | izoh */
+  #bxFund,#bxArt{flex:1 1 160px;min-width:0}
+  .shopgrid{grid-template-columns:minmax(0,1fr)}
+  .shopgrid .mixleg,.sg2 .mixleg.pay{grid-template-columns:minmax(0,1fr)!important;gap:8px}
   .stk-exp thead,.stk-art thead{display:none}
   .stk-exp tbody,.stk-art tbody{display:flex;flex-direction:column;gap:8px;padding:2px 0}
   .stk-exp tr,.stk-art tr{display:grid;gap:6px 10px;align-items:center;padding:12px 14px;border-radius:18px;background:var(--row);grid-template-columns:minmax(0,1fr) auto}
@@ -586,10 +604,14 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
       <div class="banner warn" id="bzNot" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
         <span>BILLZ hali ulanmagan. <a id="bzGo">Sozlamalar → BILLZ</a> bo'limida integratsiya kalitini kiriting.</span></div>
       <div class="toolbar">
-        <div class="seg" id="svTabs"><button data-sv="sales" class="on">Savdo</button><button data-sv="stock">Ombor</button><button data-sv="debts">Qarzlar</button></div>
+        <div class="seg" id="svTabs"><button data-sv="sales" class="on">Savdo</button><button data-sv="shops">Do'konlar</button><button data-sv="stock">Ombor</button><button data-sv="debts">Qarzlar</button><button data-sv="exp">Rasxodlar</button></div>
         <span id="perBox" style="display:contents">
           <div class="seg" id="perSeg"><button data-per="today" class="on">Bugun</button><button data-per="yday">Kecha</button><button data-per="week">7 kun</button><button data-per="month">Shu oy</button></div>
           <input class="dinput" type="date" id="sFrom"><span class="muted">—</span><input class="dinput" type="date" id="sTo">
+        </span>
+        <span id="bxFilt" style="display:none">
+          <select class="sel" id="bxFund" title="Kategoriya bo'yicha"><option value="">Hamma kategoriyalar</option></select>
+          <select class="sel" id="bxArt" title="Turi bo'yicha"><option value="">Hamma turlari</option></select>
         </span>
         <span class="sp"></span>
         <span class="muted" id="sUpd"></span>
@@ -772,7 +794,23 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               </div>
               <div class="ferr" id="bzErr"></div><div class="okmsg" id="bzOk"></div>
             </form>
+            <div id="bzpBox" hidden style="margin-top:26px;max-width:560px">
+              <h2 style="font-size:17px">Rasxodlar uchun BILLZ panel logini</h2>
+              <p class="desc">BILLZ integratsiya kaliti rasxodlarni (Moliya → Tranzaksiyalar → Xarajat) bermaydi. Shuning uchun ularni dashboard BILLZ paneliga siz kiradigan telefon va parol bilan kirib o'qiydi. Dashboard faqat <b>o'qiydi</b>, BILLZ'da hech narsa yaratmaydi va o'zgartirmaydi. Parol faqat shu dashboard serverida saqlanadi.</p>
+              <div id="bzpOn" hidden><ul class="ulist"><li><span style="font-size:18px">💸</span><b><span class="ok" style="font-weight:600">✓ Rasxodlar ulangan</span> <span class="tp" id="bzpInfo"></span></b>
+                <button class="btn danger sm" id="bzpOff" type="button">Uzish</button></li></ul></div>
+              <form id="bzpForm" autocomplete="off">
+                <label class="field"><span>Panel manzili</span><input id="bzpHost" value="rafiq.billz.io" autocapitalize="off" spellcheck="false"></label>
+                <div class="row2">
+                  <label class="field"><span>Telefon raqam</span><input id="bzpPhone" inputmode="tel" autocomplete="off" placeholder="+998 90 123 45 67"></label>
+                  <label class="field"><span id="bzpPassLbl">Parol</span><input id="bzpPass" type="password" autocomplete="new-password" placeholder="BILLZ panel paroli"></label>
+                </div>
+                <button class="btn" id="bzpBtn" type="submit">Ulash</button>
+                <div class="ferr" id="bzpErr"></div><div class="okmsg" id="bzpOk"></div>
+              </form>
+            </div>
           </div>
+          <!-- /billz panel -->
           <!-- salesdoc -->
           <div data-pane="salesdoc" hidden>
             <h2>SalesDoc ulanishi</h2><p class="desc">SalesDoc'dagi <b>Расходы</b> (rasxodlar) — fond, statya, summa va izoh — dashboardning <b>Rasxodlar</b> bo'limida ko'rsatiladi. Dashboard SalesDoc'dan faqat <b>o'qiydi</b>: u yerda hech narsani o'zgartirmaydi va o'chirmaydi.</p>
@@ -1220,17 +1258,22 @@ function setPer(p, quiet){
   if (!quiet) loadSales();
 }
 $$("#perSeg button").forEach(b => b.onclick = () => setPer(b.dataset.per));
-$$("#svTabs button").forEach(b => b.onclick = () => { sv = b.dataset.sv; $$("#svTabs button").forEach(x => x.classList.toggle("on", x === b)); loadSales(); });
+$$("#svTabs button").forEach(b => b.onclick = () => { sv = b.dataset.sv; shopSel = null; $$("#svTabs button").forEach(x => x.classList.toggle("on", x === b)); loadSales(); });
 for (const id of ["sFrom", "sTo"]) $(id).onchange = () => { per = ""; $$("#perSeg button").forEach(b => b.classList.remove("on"));
   if ($("sTo").value < $("sFrom").value) $("sTo").value = $("sFrom").value; loadSales(); };
-$("sRefresh").onclick = () => loadSales();
+$("sRefresh").onclick = () => loadSales(true);
+$("bxFund").onchange = () => { $("bxArt").value = ""; renderSales(); };
+$("bxArt").onchange = () => renderSales();
 $("bzGo").onclick = () => showSettings("billz");
 let salesSeq = 0;
-async function loadSales(){
-  $("perBox").style.display = sv === "sales" ? "contents" : "none";
+async function loadSales(fresh){
+  if (sv === "shops") return loadShops(fresh);
+  $("perBox").style.display = sv === "sales" || sv === "exp" ? "contents" : "none";
+  $("bxFilt").style.display = sv === "exp" ? "contents" : "none";
   const seq = ++salesSeq;
   $("sUpd").textContent = sv === "stock" ? "Yuklanmoqda… (ombor birinchi marta ~20 soniya)" : (sv === "sales" && $("sFrom").value !== $("sTo").value ? "Yuklanmoqda… (birinchi marta biroz vaqt oladi)" : "Yuklanmoqda…");
-  const url = sv === "sales" ? `/api/sales?from=${$("sFrom").value}&to=${$("sTo").value}` : `/api/sales/${sv}`;
+  const url = sv === "sales" ? `/api/sales?from=${$("sFrom").value}&to=${$("sTo").value}`
+    : sv === "exp" ? `/api/sales/expenses?from=${$("sFrom").value}&to=${$("sTo").value}${fresh ? "&fresh=1" : ""}` : `/api/sales/${sv}`;
   try{
     const d = await j(url);
     if (seq !== salesSeq) return;
@@ -1249,6 +1292,12 @@ function renderSales(){
   if (d.kind === "sales") return renderSalesMain(d, box);
   if (d.kind === "stock") return renderStock(d, box);
   if (d.kind === "debts") return renderDebts(d, box);
+  if (d.kind === "shops") return shopSel ? renderShop(d, box) : renderShops(d, box);
+  if (d.kind === "exp"){
+    if (d.need_panel){ box.innerHTML = `<div class="banner warn"><span>BILLZ rasxodlari integratsiya kaliti orqali berilmaydi. <a id="bxGo">Sozlamalar → BILLZ</a> bo'limida <b>BILLZ panel logini</b> (telefon va parol) ni kiriting.</span></div>`;
+      $("bxGo").onclick = () => showSettings("billz"); return; }
+    return renderExp(d, box, BXO);
+  }
 }
 function renderSalesMain(d, box){
   const avg = d.checks ? d.total / d.checks : 0;
@@ -1277,7 +1326,7 @@ function renderSalesMain(d, box){
     <div class="sg2">
       <div class="card pad"><div class="ct">${d.one_day ? "Soatlar bo'yicha savdo" : "Kunlar bo'yicha savdo"}<b>${sum(d.total)} so'm</b></div><div class="chart">${bars}</div></div>
       <div class="col">
-        <div class="card pad"><div class="ct">Do'konlar</div>${hlist(d.shops, d.total)}</div>
+        ${d.shop ? "" : `<div class="card pad"><div class="ct">Do'konlar</div>${hlist(d.shops, d.total)}</div>`}
         <div class="card pad"><div class="ct">To'lov turlari</div>${hlist(d.payments, d.total)}</div>
       </div>
     </div>
@@ -1297,6 +1346,82 @@ function renderSalesMain(d, box){
   box.querySelectorAll("select[data-seller]").forEach(s => s.onchange = async () => {
     await post("/api/billz/link", {name: s.dataset.seller, staff_id: s.value || null}); loadSales();
   });
+}
+/* --- do'konlar: har birining savdosi to'lov turlari bo'yicha, ichiga kirsa — savdo va rasxod */
+let shopSel = null;
+const PAYS = ["Naqd", "Uzcard", "Click", "Humo", "Qarz"];
+const payColor = n => { const i = PAYS.indexOf(n); return i >= 0 ? `var(--mix${i + 1})` : "var(--mix0)"; };
+const payList = ps => { const m = new Map((ps || []).map(p => [p.name, p.total]));
+  return PAYS.map(n => ({name: n, total: m.get(n) || 0})).concat((ps || []).filter(p => !PAYS.includes(p.name))); };
+function payMix(ps, total){
+  const parts = payList(ps).filter(p => p.total > 0), pct = v => total ? v / total * 100 : 0;
+  return `<div class="mixbar" style="height:30px;margin:2px 0 12px">${parts.map(p => `<div class="mixseg" style="flex:${Math.max(p.total, total * .006)} 1 0;background:${payColor(p.name)};cursor:default" title="${esc(p.name)} — ${sum(p.total)} so'm (${pct(p.total).toFixed(1)}%)">${pct(p.total) >= 9 ? `<span>${Math.round(pct(p.total))}%</span>` : ""}</div>`).join("") || '<div class="mixseg" style="flex:1;background:var(--mix0)"></div>'}</div>
+    <ul class="mixleg">${payList(ps).map(p => `<li><i style="background:${payColor(p.name)}"></i><span>${esc(p.name)}</span><b>${short(p.total)}</b><small>${pct(p.total).toFixed(1)}%</small></li>`).join("")}</ul>`;
+}
+let shopSeq = 0;
+async function loadShops(fresh){
+  $("perBox").style.display = "contents";
+  $("bxFilt").style.display = shopSel ? "contents" : "none";
+  const seq = ++shopSeq, f = $("sFrom").value, t = $("sTo").value;
+  $("sUpd").textContent = "Yuklanmoqda…";
+  try{
+    const [d, e] = await Promise.all([j(`/api/sales?from=${f}&to=${t}${shopSel ? "&shop=" + encodeURIComponent(shopSel) : ""}`),
+      j(`/api/sales/expenses?from=${f}&to=${t}${fresh ? "&fresh=1" : ""}`).catch(() => null)]);
+    if (seq !== shopSeq || sv !== "shops") return;
+    SD = {kind: "shops", ...d, exp: e};
+    $("bzNot").hidden = d.connected !== false;
+    $("sErr").hidden = !d.error; $("sErr").textContent = d.error || "";
+    $("sUpd").textContent = d.fetched ? `BILLZ: ${hm(d.fetched)}` : "";
+    renderSales();
+  }catch(err){ if (seq === shopSeq) $("sUpd").textContent = ""; }
+}
+const expOk = e => e && !e.need_panel && e.connected !== false && Array.isArray(e.rows);
+const expOf = (e, shop) => expOk(e) ? e.rows.filter(r => r.shop === shop && curOf(r.currency).k !== "usd").reduce((a, r) => a + r.amount, 0) : null;
+function renderShops(d, box){
+  const list = (d.shops_detail || []).filter(x => qm(x.name));
+  const range = d.one_day ? uzDate(d.from) : `${d.from.slice(8,10)}.${d.from.slice(5,7)} — ${ddmm(d.to)}`;
+  const hasExp = expOk(d.exp), max = Math.max(1, ...list.map(x => x.total));
+  const val = (x, n) => (payList(x.payments).find(p => p.name === n) || {}).total || 0;
+  box.innerHTML = `
+    ${d.exp && d.exp.need_panel ? `<div class="banner warn" style="margin-bottom:12px"><span>Do'konlar rasxodini ham ko'rish uchun <a id="shGo">Sozlamalar → BILLZ</a> da panel logini kiriting.</span></div>` : ""}
+    <div class="shopgrid">${list.map(x => { const ex = expOf(d.exp, x.name);
+      return `<div class="card pad shopcard" data-shop="${esc(x.name)}" tabindex="0" role="button" title="${esc(x.name)} — batafsil">
+        <div class="shead"><b>${esc(x.name)}</b><span class="muted">${esc(range)}</span></div>
+        <div class="sbig">${sum(x.total)}<small> so'm</small></div>
+        <div class="muted" style="font-size:12.5px;margin:2px 0 12px">${sum(x.checks)} chek · o'rtacha ${short(x.checks ? x.total / x.checks : 0)} so'm${x.refunds ? ` · ${x.refunds} qaytarish` : ""}</div>
+        <div class="tr" style="margin-bottom:14px"><i style="width:${x.total / max * 100}%"></i></div>
+        ${payMix(x.payments, x.total)}
+        ${ex != null ? `<div class="snet"><span>Rasxod <b style="color:var(--orange)">${short(ex)}</b></span><span>Savdo − rasxod <b>${short(x.total - ex)}</b></span></div>` : ""}
+        <div class="smore">Batafsil →</div></div>`; }).join("") || '<div class="card pad muted">Bu davrda savdo yo\'q</div>'}</div>
+    ${list.length ? `<div class="secttl">Solishtirish — to'lov turlari bo'yicha</div>
+    <div class="card tablecard"><div class="tablewrap"><table><thead><tr><th>Do'kon</th>${PAYS.map(n => `<th>${n}</th>`).join("")}<th>Jami savdo</th>${hasExp ? "<th>Rasxod</th><th>Savdo − rasxod</th>" : ""}</tr></thead><tbody>
+      ${list.map(x => { const ex = expOf(d.exp, x.name); return `<tr data-shop="${esc(x.name)}" style="cursor:pointer"><td><b>${esc(x.name)}</b></td>${PAYS.map(n => `<td class="num">${sum(val(x, n))}</td>`).join("")}<td class="num strong">${sum(x.total)}</td>${hasExp ? `<td class="num" style="color:var(--orange)">${sum(ex)}</td><td class="num strong">${sum(x.total - ex)}</td>` : ""}</tr>`; }).join("")}
+      <tr><td><b>Jami</b></td>${PAYS.map(n => `<td class="num strong">${sum(list.reduce((a, x) => a + val(x, n), 0))}</td>`).join("")}<td class="num strong">${sum(list.reduce((a, x) => a + x.total, 0))}</td>${hasExp ? `<td class="num strong" style="color:var(--orange)">${sum(list.reduce((a, x) => a + expOf(d.exp, x.name), 0))}</td><td class="num strong">${sum(list.reduce((a, x) => a + x.total - expOf(d.exp, x.name), 0))}</td>` : ""}</tr>
+    </tbody></table></div></div>` : ""}`;
+  box.querySelectorAll("[data-shop]").forEach(el => { const go = () => { shopSel = el.dataset.shop; $("bxFund").value = ""; $("bxArt").value = ""; loadShops(); window.scrollTo(0, 0); };
+    el.onclick = go; el.onkeydown = ev => { if (ev.key === "Enter") go(); }; });
+  const g = $("shGo"); if (g) g.onclick = () => showSettings("billz");
+}
+const SXO = {fund: "bxFund", art: "bxArt", re: () => renderSales(), F: "Kategoriya", Fs: "Kategoriyalar", fs: "kategoriyalar", f1: "kategoriya", A: "Turi", as: "turlar"};
+function renderShop(d, box){
+  const x = (d.shops_detail || []).find(s => s.name === shopSel) || {name: shopSel, total: 0, checks: 0, payments: []};
+  const ex = expOf(d.exp, shopSel);
+  box.innerHTML = `
+    <div class="shopbar"><button class="link" id="shBack">← Hamma do'konlar</button><h2>${esc(shopSel)}</h2></div>
+    <div class="sg2 top">
+      <div class="card pad"><div class="ct">To'lov turlari<b>${sum(x.total)} so'm</b></div>${payMix(x.payments, x.total)}</div>
+      <div class="card pad"><div class="ct">Savdo va rasxod</div>
+        ${ex != null ? `<ul class="hl"><li><span>Savdo</span><b>${short(x.total)}</b><div class="tr"><i style="width:100%"></i></div></li>
+          <li><span>Rasxod</span><b style="color:var(--orange)">${short(ex)}</b><div class="tr"><i style="width:${x.total ? Math.min(100, ex / x.total * 100) : 0}%;background:var(--orange)"></i></div></li></ul>
+          <div class="snet" style="margin-top:12px"><span>Savdo − rasxod</span><b>${sum(x.total - ex)} so'm</b></div>`
+        : `<div class="muted" style="font-size:13px">${d.exp && d.exp.need_panel ? `Rasxodlarni ko'rish uchun <a class="link" id="shGo2">Sozlamalar → BILLZ</a> da panel logini kiriting.` : (d.exp && d.exp.error ? esc(d.exp.error) : "Rasxod ma'lumoti yo'q")}</div>`}</div>
+    </div>
+    <div id="shSales"></div>
+    ${expOk(d.exp) ? `<div class="secttl" style="font-size:18px;margin-top:26px">Rasxodlar — ${esc(shopSel)}</div><div id="shExp"></div>` : ""}`;
+  renderSalesMain(d, $("shSales"));
+  if (expOk(d.exp)) renderExp({...d.exp, rows: d.exp.rows.filter(r => r.shop === shopSel)}, $("shExp"), SXO);
+  $("shBack").onclick = () => { shopSel = null; loadShops(); };
+  const g = $("shGo2"); if (g) g.onclick = () => showSettings("billz");
 }
 function renderStock(d, box){
   const units = d.units.map(u => `${qty(u.measurement_value)} ${esc(u.measurement_unit)}`).join(" · ");
@@ -1392,16 +1517,17 @@ function fillSel(id, first, vals){
   if (el.dataset.sig !== html){ el.innerHTML = html; el.dataset.sig = html; }
   el.value = vals.includes(v) ? v : "";
 }
-function renderExp(){
-  const d = ED, box = $("expBody");
+const EXO = {fund: "exFund", art: "exArt", re: () => renderExp(), F: "Fond", Fs: "Fondlar", fs: "fondlar", f1: "fond", A: "Statya", as: "statyalar"};
+const BXO = {fund: "bxFund", art: "bxArt", re: () => renderSales(), F: "Kategoriya", Fs: "Kategoriyalar", fs: "kategoriyalar", f1: "kategoriya", A: "Turi", as: "turlar"};
+function renderExp(d = ED, box = $("expBody"), o = EXO){
   if (!d || d.connected === false){ box.innerHTML = ""; return; }
   const all = d.rows || [];
   const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y));
-  fillSel("exFund", "Hamma fondlar", uniq(all.map(r => r.fund)));
-  const fund = $("exFund").value;
-  fillSel("exArt", "Hamma statyalar", uniq(all.filter(r => !fund || r.fund === fund).map(r => r.article)));
-  const art = $("exArt").value;
-  const rows = all.filter(r => (!fund || r.fund === fund) && (!art || r.article === art) && qm(r.fund, r.article, r.comment, r.author));
+  fillSel(o.fund, "Hamma " + o.fs, uniq(all.map(r => r.fund)));
+  const fund = $(o.fund).value;
+  fillSel(o.art, "Hamma " + o.as, uniq(all.filter(r => !fund || r.fund === fund).map(r => r.article)));
+  const art = $(o.art).value;
+  const rows = all.filter(r => (!fund || r.fund === fund) && (!art || r.article === art) && qm(r.fund, r.article, r.comment, r.author, r.shop, r.person));
   const som = rows.filter(r => curOf(r.currency).k !== "usd"), usd = rows.filter(r => curOf(r.currency).k === "usd");
   const tot = som.reduce((a, r) => a + r.amount, 0), totUsd = usd.reduce((a, r) => a + r.amount, 0);
   const group = (list, key) => { const m = new Map(); for (const r of list){ const k = key(r); const g = m.get(k) || {name: k, total: 0, n: 0}; g.total += r.amount; g.n++; m.set(k, g); }
@@ -1409,6 +1535,7 @@ function renderExp(){
   const SEP = "\u0001";
   const funds = group(som, r => r.fund || "—");
   const pays = group(som, r => curOf(r.currency).t);
+  const shops = rows.some(r => r.shop) ? group(som, r => r.shop || "—") : [];
   const arts = group(som, r => (r.fund || "—") + SEP + (r.article || "—"));
   const days = Math.round((new Date(d.to) - new Date(d.from)) / 864e5) + 1;
   const range = d.from === d.to ? uzDate(d.from) : `${d.from.slice(8,10)}.${d.from.slice(5,7)} — ${ddmm(d.to)}`;
@@ -1420,7 +1547,7 @@ function renderExp(){
   const big = funds[0];
   const top5 = funds.slice(0, 5), rest = funds.slice(5).reduce((a, r) => a + r.total, 0);
   const parts = top5.map((r, i) => ({name: r.name, total: r.total, c: `var(--mix${i + 1})`, fund: r.name}))
-    .concat(rest > 0 ? [{name: `Boshqalar (${funds.length - 5} ta fond)`, total: rest, c: "var(--mix0)"}] : []);
+    .concat(rest > 0 ? [{name: `Boshqalar (${funds.length - 5} ta ${o.f1})`, total: rest, c: "var(--mix0)"}] : []);
   const pct = v => tot ? v / tot * 100 : 0;
   const mix = !tot ? '<div class="muted">Bu davrda rasxod yo\'q</div>' : `
     <div class="mixbar">${parts.map(p => `<div class="mixseg" ${p.fund ? `data-fund="${esc(p.fund)}"` : ""} style="flex:${Math.max(p.total, tot * .004)} 1 0;background:${p.c}" title="${esc(p.name)} — ${sum(p.total)} so'm (${pct(p.total).toFixed(1)}%)">${pct(p.total) >= 7 ? `<span>${Math.round(pct(p.total))}%</span>` : ""}</div>`).join("")}</div>
@@ -1430,33 +1557,34 @@ function renderExp(){
       <div class="card stat" style="color:var(--orange)"><div class="l">Jami rasxod · ${esc(range)}</div><div class="v sm">${short(tot)}<small>so'm</small></div><div class="bar"><b style="width:100%"></b></div></div>
       <div class="card stat" style="color:var(--teal)"><div class="l">Yozuvlar soni</div><div class="v sm">${sum(rows.length)}</div><div class="bar"><b style="width:100%"></b></div></div>
       <div class="card stat" style="color:var(--lime)"><div class="l">${totUsd ? "Dollarda" : "Kuniga o'rtacha"}</div><div class="v sm">${totUsd ? "$" + qty(totUsd) : short(tot / days)}${totUsd ? "" : "<small>so'm</small>"}</div><div class="bar"><b style="width:100%"></b></div></div>
-      <div class="card stat" style="color:var(--red)"><div class="l">Eng katta fond</div><div class="v sm" style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(big ? big.name : "")}">${big ? esc(big.name) : "—"}</div><div class="sub" style="margin-top:6px">${big ? short(big.total) + " so'm · " + Math.round(big.total / (tot || 1) * 100) + "%" : ""}</div></div>
+      <div class="card stat" style="color:var(--red)"><div class="l">Eng katta ${o.f1}</div><div class="v sm" style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(big ? big.name : "")}">${big ? esc(big.name) : "—"}</div><div class="sub" style="margin-top:6px">${big ? short(big.total) + " so'm · " + Math.round(big.total / (tot || 1) * 100) + "%" : ""}</div></div>
     </div>
     <div class="sg2 top">
       <div class="col">
         ${days > 1 ? `<div class="card pad"><div class="ct">Kunlar bo'yicha rasxod<b>${sum(tot)} so'm</b></div><div class="chart">${bars}</div></div>` : ""}
-        <div class="card pad dsk-only"><div class="ct">Rasxod tarkibi — fondlar ulushi<b>${sum(tot)} so'm</b></div>${mix}</div>
-        <div class="card pad dsk-only"><div class="ct">Eng katta statyalar (top 10)</div>${hlist(arts.slice(0, 10).map(a => ({name: a.name.split(SEP)[1] + " · " + a.name.split(SEP)[0], total: a.total})), arts[0] ? arts[0].total : 0)}</div>
+        <div class="card pad dsk-only"><div class="ct">Rasxod tarkibi — ${o.fs} ulushi<b>${sum(tot)} so'm</b></div>${mix}</div>
+        <div class="card pad dsk-only"><div class="ct">Eng katta ${o.as} (top 10)</div>${hlist(arts.slice(0, 10).map(a => ({name: a.name.split(SEP)[1] + " · " + a.name.split(SEP)[0], total: a.total})), arts[0] ? arts[0].total : 0)}</div>
       </div>
       <div class="col">
-        <div class="card pad"><div class="ct">Fondlar${fund ? ` <a class="link" id="exAllF" style="margin-left:6px">hammasi</a>` : ""}</div>${flist}</div>
+        <div class="card pad"><div class="ct">${o.Fs}${fund ? ` <a class="link" id="${o.fund}All" style="margin-left:6px">hammasi</a>` : ""}</div>${flist}</div>
+        ${shops.length > 1 || (shops[0] && shops[0].name !== "—") ? `<div class="card pad"><div class="ct">Do'konlar</div>${hlist(shops, tot)}</div>` : ""}
         <div class="card pad"><div class="ct">To'lov turi</div>${hlist(pays, tot)}</div>
       </div>
     </div>
-    <div class="secttl">Fond va statyalar bo'yicha</div>
-    <div class="card tablecard"><div class="tablewrap"><table class="stk-art"><thead><tr><th>Fond</th><th>Statya</th><th>Soni</th><th>Summa</th><th>Ulushi</th></tr></thead><tbody>
+    <div class="secttl">${o.F} va ${o.as} bo'yicha</div>
+    <div class="card tablecard"><div class="tablewrap"><table class="stk-art"><thead><tr><th>${o.F}</th><th>${o.A}</th><th>Soni</th><th>Summa</th><th>Ulushi</th></tr></thead><tbody>
       ${arts.map(a => { const [f, s2] = a.name.split(SEP); return `<tr><td>${tpill(f)}</td><td>${esc(s2)}</td><td class="num muted">${a.n}</td><td class="num strong">${sum(a.total)} so'm</td>
         <td><div class="share"><div class="tr"><i style="width:${tot ? a.total / tot * 100 : 0}%;background:var(--orange)"></i></div><small class="muted">${tot ? Math.round(a.total / tot * 100) : 0}%</small></div></td></tr>`; }).join("")
         || '<tr class="empty"><td colspan="5">Bu davrda rasxod yo\'q</td></tr>'}
     </tbody></table></div></div>
     <div class="secttl">Hamma rasxodlar <span class="muted" style="font-size:13px">(${rows.length} ta)</span></div>
-    <div class="card tablecard"><div class="tablewrap"><table class="stk-exp"><thead><tr><th>Sana</th><th>Fond</th><th>Statya</th><th>Summa</th><th>Izoh</th></tr></thead><tbody>
-      ${rows.map(r => { const c = curOf(r.currency); return `<tr><td class="num muted">${ddmm(r.date)}</td><td>${tpill(r.fund)}</td><td>${esc(r.article)}</td>
-        <td class="num strong">${c.k === "usd" ? "$" + qty(r.amount) : sum(r.amount)}<small>${c.k === "usd" ? "dollar" : esc(c.t)}</small></td><td style="white-space:normal;max-width:420px">${esc(r.comment)}</td></tr>`; }).join("")
+    <div class="card tablecard"><div class="tablewrap"><table class="stk-exp"><thead><tr><th>Sana</th><th>${o.F}</th><th>${o.A}</th><th>Summa</th><th>Izoh</th></tr></thead><tbody>
+      ${rows.map(r => { const c = curOf(r.currency); return `<tr><td class="num muted">${ddmm(r.date)}${r.time ? " " + esc(r.time) : ""}${r.shop ? `<small style="display:block">${esc(r.shop)}</small>` : ""}</td><td>${tpill(r.fund)}</td><td>${esc(r.article)}</td>
+        <td class="num strong">${c.k === "usd" ? "$" + qty(r.amount) : sum(r.amount)}<small>${c.k === "usd" ? "dollar" : esc(c.t)}</small></td><td style="white-space:normal;max-width:420px">${esc(r.comment)}${r.author ? `<small class="muted" style="display:block">${esc(r.author)}${r.person && r.person !== r.author ? " · " + esc(r.person) : ""}</small>` : ""}</td></tr>`; }).join("")
         || `<tr class="empty"><td colspan="5">${all.length ? "Filtrga mos rasxod yo'q" : "Bu davrda rasxod yo'q"}</td></tr>`}
     </tbody></table></div></div>`;
-  box.querySelectorAll("[data-fund]").forEach(li => li.onclick = () => { $("exFund").value = li.dataset.fund; $("exArt").value = ""; renderExp(); });
-  const af = $("exAllF"); if (af) af.onclick = () => { $("exFund").value = ""; $("exArt").value = ""; renderExp(); };
+  box.querySelectorAll("[data-fund]").forEach(li => li.onclick = () => { $(o.fund).value = li.dataset.fund; $(o.art).value = ""; o.re(); });
+  const af = $(o.fund + "All"); if (af) af.onclick = () => { $(o.fund).value = ""; $(o.art).value = ""; o.re(); };
 }
 
 /* ================= SOZLAMALAR ================= */
@@ -1842,11 +1970,33 @@ $("tgTest").onclick = async () => {
 /* --- billz */
 function paintBz(d){
   $("bzOn").hidden = !d.connected;
+  paintBzp(d.panel, d.connected);
   $("bzInfo").textContent = [d.company, d.connected_at ? "· ulangan: " + fmtDT(d.connected_at) : ""].filter(Boolean).join(" ");
   $("bzLbl").textContent = d.connected ? `BILLZ maxfiy kaliti (saqlangan: ${d.secret_hint})` : "BILLZ maxfiy kaliti";
   $("bzKey").placeholder = d.connected ? "Almashtirish uchun yangi kalitni qo'ying" : "Secret key";
 }
 async function loadBz(){ paintBz(await j("/api/billz")); }
+function paintBzp(p, on){
+  $("bzpBox").hidden = !on; p = p || {};
+  $("bzpOn").hidden = !p.connected;
+  $("bzpInfo").textContent = [p.phone ? p.phone + " @ " + p.host : "", p.connected_at ? "· ulangan: " + fmtDT(p.connected_at) : ""].filter(Boolean).join(" ");
+  if (p.host) $("bzpHost").value = p.host;
+  $("bzpPassLbl").textContent = p.connected ? "Parol (saqlangan — almashtirish uchun yangisini yozing)" : "Parol";
+  $("bzpBtn").textContent = p.connected ? "Saqlash" : "Ulash";
+}
+$("bzpForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("bzpErr", "");
+  const phone = $("bzpPhone").value.trim(); if (!phone) return showErr("bzpErr", "Telefon raqamni kiriting");
+  const b = $("bzpBtn"), txt = b.textContent; b.disabled = true; b.textContent = "Tekshirilmoqda…";
+  try{ const d = await post("/api/billz/panel", {host: $("bzpHost").value.trim(), phone, password: $("bzpPass").value});
+    $("bzpPass").value = ""; $("bzpPhone").value = ""; paintBzp(d, true); showOk("bzpOk", "✓ Ulandi — BILLZ → Rasxodlar tabini oching"); }
+  catch(e){ showErr("bzpErr", e.message); b.textContent = txt; }
+  finally{ b.disabled = false; }
+};
+$("bzpOff").onclick = async () => {
+  if (!confirm("BILLZ rasxodlari ulanishini uzasizmi? (Telefon/parol dashboarddan o'chiriladi, BILLZ'dagi ma'lumotlarga hech narsa qilinmaydi.)")) return;
+  paintBzp(await post("/api/billz/panel", {disconnect: true}), true);
+};
 $("bzForm").onsubmit = async ev => {
   ev.preventDefault(); showErr("bzErr", "");
   const secret = $("bzKey").value.trim(); if (!secret) return showErr("bzErr", "Kalitni kiriting");
