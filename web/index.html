@@ -205,7 +205,22 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .titem{padding:18px;border-radius:20px;background:var(--g1);border:1px solid var(--line)}
 .titem h3{margin:0;font-size:19px;font-weight:600;display:flex;align-items:center;gap:8px}
 .titem .meta{color:var(--muted);font-size:12.5px;margin:6px 0 10px;line-height:1.6}
-.titem .acts{display:flex;gap:8px}
+.titem .acts{display:flex;gap:8px;flex-wrap:wrap}
+.titem.off{opacity:.62}
+.titem.off h3::after{content:"o'chiq";font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--g2);color:var(--muted)}
+.found{list-style:none;margin:8px 0 4px;padding:0;display:flex;flex-direction:column;gap:6px}
+.found li{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;background:var(--g1);border:1px solid var(--line);font-size:13px}
+.found li .grow{flex:1;min-width:0}
+.found li small{color:var(--muted);display:block}
+.enr{display:grid;grid-template-columns:170px 1fr;gap:16px;align-items:start}
+.facebox{aspect-ratio:3/4;border-radius:18px;background:var(--g1);border:1px dashed var(--line2);overflow:hidden;position:relative;
+  display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12px;text-align:center;padding:0}
+.facebox img,.facebox video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.facebox video{transform:scaleX(-1)}
+.facebtns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.facebtns .btn{flex:1;padding-left:8px;padding-right:8px}
+.tips{font-size:12px;color:var(--muted);margin:6px 0 0;padding-left:16px;line-height:1.55}
+@media (max-width:560px){.enr{grid-template-columns:1fr}.facebox{max-width:220px}}
 .chips{display:flex;gap:5px;flex-wrap:wrap}
 .check{display:inline-flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer;font-size:13px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -390,6 +405,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
           <button data-st="billz">🛒 BILLZ</button>
           <button data-st="accounts">🔑 Foydalanuvchilar</button>
           <button data-st="general">⏰ Ish vaqti</button>
+          <button data-st="backup">💾 Zaxira</button>
         </div>
         <div class="card spane">
           <!-- terminallar -->
@@ -401,7 +417,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
           <!-- xodimlar -->
           <div data-pane="staff" hidden>
             <div class="phead"><div><h2>Xodimlar</h2><p class="desc">Xodimni qo'shing va har bir terminaldagi ID siga bog'lang. Bir xodim bir nechta terminalda bo'lishi mumkin — hammasi bitta odam bo'lib hisoblanadi.</p></div>
-              <button class="btn" id="addStaff">+ Xodim qo'shish</button></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" id="addEnroll" type="button">📷 Terminalga Face ID qo'shish</button><button class="btn" id="addStaff">+ Xodim qo'shish</button></div></div>
             <div class="tablewrap"><table><thead><tr><th>Xodim</th><th>Tabel raqami</th><th>Bo'lim</th><th>Terminallar</th><th></th></tr></thead><tbody id="staffBody"></tbody></table></div>
           </div>
           <!-- moslash -->
@@ -412,7 +428,20 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               <label class="check"><input type="checkbox" id="onlyUnl"> Faqat bog'lanmaganlar</label>
               <span class="muted" id="autoMsg"></span>
             </div>
-            <div class="tablewrap"><table><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th></tr></thead><tbody id="matchBody"></tbody></table></div>
+            <div class="tablewrap"><table><thead><tr><th>Terminal</th><th>Terminal ID</th><th>Terminaldagi ism</th><th>Xodim</th><th></th></tr></thead><tbody id="matchBody"></tbody></table></div>
+          </div>
+          <!-- zaxira -->
+          <div data-pane="backup" hidden>
+            <h2>Zaxira va ko'chirish</h2>
+            <p class="desc">Hamma ma'lumot — davomat bazasi, xodimlar, terminallar, Telegram va BILLZ sozlamalari, rasmlar — bitta faylga. Shu fayl bilan dashboardni boshqa kompyuter yoki serverga ko'chirasiz.</p>
+            <div class="sec">Zaxirani yuklab olish</div>
+            <p class="muted" style="margin:0 0 10px;font-size:13px">⚠️ Faylda terminal paroli, bot tokeni, BILLZ kaliti va xodimlar rasmlari bor — uni hech kimga bermang va internetga qo'ymang.</p>
+            <a class="btn" id="bkDown" href="/api/backup.zip" download>⬇️ Zaxirani yuklab olish</a>
+            <div class="sec">Zaxiradan tiklash</div>
+            <p class="muted" style="margin:0 0 10px;font-size:13px">Shu dashboarddagi <b>hamma ma'lumot zaxiradagisi bilan almashtiriladi</b>. Keyin zaxiradagi login/parol bilan qayta kirasiz.</p>
+            <input type="file" id="bkFile" accept=".zip,application/zip" hidden>
+            <button class="btn ghost" type="button" id="bkUp">⬆️ Zaxira faylini tanlash va tiklash</button>
+            <div class="ferr" id="bkErr"></div><div class="okmsg" id="bkOk"></div>
           </div>
           <!-- foydalanuvchilar -->
           <div data-pane="accounts" hidden>
@@ -551,13 +580,43 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
     <label class="field"><span>IP manzil</span><input id="tfHost" placeholder="192.168.1.20" autocapitalize="off" spellcheck="false"></label>
     <label class="field" style="grid-column:span 2"><span>Port</span><input id="tfPort" type="number" value="80"></label>
   </div>
+  <button class="btn ghost sm" type="button" id="tfFind">🔍 Tarmoqdan terminalni qidirish</button>
+  <ul class="found" id="tfFound"></ul>
   <div class="row2">
     <label class="field"><span>Terminal logini</span><input id="tfUser" placeholder="Terminal logini" autocapitalize="off" spellcheck="false"></label>
     <label class="field"><span>Terminal paroli</span><input id="tfPass" type="password" placeholder="Terminal paroli" autocomplete="new-password"></label>
   </div>
-  <p class="muted" style="margin:0 0 8px;font-size:12.5px">Saqlashdan oldin terminalga ulanib tekshiriladi. Terminal shu kompyuter bilan bir tarmoqda bo'lishi kerak.</p>
+  <p class="muted" style="margin:0 0 8px;font-size:12.5px">Saqlashdan oldin terminalga ulanib tekshiriladi. Terminal shu kompyuter bilan bir tarmoqda bo'lishi kerak. Keyin terminal o'chib-yonib IP si o'zgarsa, dashboard uni tarmoqdan o'zi topib oladi.</p>
   <button class="btn full" type="submit" id="tfBtn">Ulanib, saqlash</button>
   <div class="ferr" id="tfErr"></div>
+</form></div>
+
+<!-- terminalga odam + Face ID qo'shish -->
+<div class="modal" id="mEnroll"><form class="mbox" id="enrForm" autocomplete="off" style="max-width:620px">
+  <div class="mhead"><h3 id="enTitle">Terminalga Face ID qo'shish</h3><button class="x" type="button" data-close>×</button></div>
+  <div class="enr">
+    <div>
+      <div class="facebox" id="enBox"><span id="enHint">Yuz rasmi<br>yo'q</span></div>
+      <div class="facebtns">
+        <button class="btn ghost sm" type="button" id="enCam">📷 Kamera</button>
+        <button class="btn ghost sm" type="button" id="enPick">🖼 Fayl</button>
+      </div>
+      <button class="btn sm full" type="button" id="enShot" hidden style="margin-top:6px">Suratga olish</button>
+      <input type="file" id="enFile" accept="image/*" capture="user" hidden>
+    </div>
+    <div>
+      <label class="field"><span>Terminal</span><select id="enTerm"></select></label>
+      <label class="field"><span>Ism familiya (terminal ekranida chiqadi)</span><input id="enName" maxlength="32" placeholder="Masalan: Ayubxon Sattorov"></label>
+      <label class="field"><span>ID raqami</span><input id="enEmp" maxlength="32" inputmode="numeric" placeholder="1"></label>
+      <label class="field" id="enStaffF"><span>Dashboarddagi xodim</span><select id="enStaff"></select></label>
+      <ul class="tips">
+        <li>Yuz to'g'ridan, yorug' joyda, ko'zoynaksiz va yolg'iz tushsin.</li>
+        <li>Rasm avtomatik kichraytiriladi (terminal 200 KB gacha qabul qiladi).</li>
+      </ul>
+    </div>
+  </div>
+  <button class="btn full" type="submit" id="enBtn" style="margin-top:14px">Terminalga yozish</button>
+  <div class="ferr" id="enErr"></div>
 </form></div>
 
 <!-- xodim formasi -->
@@ -695,6 +754,7 @@ async function pollState(){
   }catch(e){}
 }
 function termStatus(t){
+  if (!t.active) return ["muted", "O'chirib qo'yilgan · tarixi saqlanadi"];
   if (t.connected) return ["ok", `Ulangan · ${t.last_poll ? ago(t.last_poll, S.now) : ""}`];
   if (t.need_login) return ["bad", "Login/parol kerak"];
   return ["warn", "Ulanmagan"];
@@ -702,7 +762,7 @@ function termStatus(t){
 function renderTermCards(){
   const box = $("cards");
   box.querySelectorAll(".tcard").forEach(e => e.remove());
-  const html = S.terminals.map(t => {
+  const html = S.terminals.filter(t => t.active).map(t => {
     const [cls, txt] = termStatus(t);
     return `<div class="card tcard" data-tid="${t.id}" title="${esc(t.error || "")}">
       <div class="k"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2.5" width="12" height="19" rx="2"/><circle cx="12" cy="9" r="2.5"/></svg><b>${esc(t.name)}</b>· ${esc(t.host)}${t.model ? " · " + esc(t.model) : ""}</div>
@@ -1002,14 +1062,21 @@ async function loadTerms(){
   TERMS = (await j("/api/terminals")).terminals;
   $("termList").innerHTML = TERMS.map(t => {
     const [cls, txt] = termStatus(t);
-    return `<div class="titem"><h3>${esc(t.name)}</h3>
+    return `<div class="titem${t.active ? "" : " off"}"><h3>${esc(t.name)}</h3>
       <div class="meta"><span class="${cls}" style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot"></span>${esc(txt)}</span><br>
       ${esc(t.host)}:${t.port} · login: ${esc(t.username)}${t.model ? "<br>" + esc(t.model) : ""}<br>
       o'tishlar: ${t.events_total} · terminaldagi ID lar: ${t.users_total}
-      ${t.error ? `<br><span class="bad">${esc(t.error)}</span>` : ""}</div>
-      <div class="acts"><button class="btn ghost sm" data-edit="${t.id}">Tahrirlash</button><button class="btn danger sm" data-del="${t.id}">O'chirish</button></div></div>`;
+      ${t.error && t.active ? `<br><span class="bad">${esc(t.error)}</span>` : ""}</div>
+      <div class="acts"><button class="btn ghost sm" data-edit="${t.id}">Tahrirlash</button><button class="btn ghost sm" data-act="${t.id}">${t.active ? "O'chirib qo'yish" : "Yoqish"}</button><button class="btn danger sm" data-del="${t.id}">O'chirish</button></div></div>`;
   }).join("") || `<p class="muted">Hali terminal yo'q. "+ Terminal qo'shish" tugmasini bosing.</p>`;
   $("termList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => termForm(TERMS.find(t => t.id == b.dataset.edit)));
+  $("termList").querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    const t = TERMS.find(x => x.id == b.dataset.act);
+    if (t.active && !confirm(`"${t.name}" terminalini o'chirib qo'yasizmi?\n\nServer unga ulanmaydi, lekin ${t.events_total} ta eski o'tish hisobotlarda qoladi. Keyin "Yoqish" bilan qaytarish mumkin.`)) return;
+    b.disabled = true;
+    try{ await post("/api/terminals/active", {id: t.id, active: !t.active}); }catch(e){ alert(e.message); }
+    loadTerms(); pollState();
+  });
   $("termList").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     const t = TERMS.find(x => x.id == b.dataset.del);
     if (!confirm(`"${t.name}" terminalini o'chirasizmi?\n\nDiqqat: bu terminaldan kelgan barcha o'tishlar (${t.events_total} ta) ham dashboarddan o'chadi. Buni qaytarib bo'lmaydi.`)) return;
@@ -1023,8 +1090,25 @@ function termForm(t){
   $("tfName").value = t ? t.name : ""; $("tfHost").value = t ? t.host : ""; $("tfPort").value = t ? t.port : 80;
   $("tfUser").value = t ? t.username : ""; $("tfPass").value = "";
   $("tfPass").placeholder = t ? "O'zgartirmaslik uchun bo'sh qoldiring" : "Terminal paroli";
-  showErr("tfErr", ""); openModal("mTerm"); setTimeout(() => $("tfName").focus(), 50);
+  showErr("tfErr", ""); $("tfFound").innerHTML = ""; openModal("mTerm"); setTimeout(() => $("tfName").focus(), 50);
 }
+$("tfFind").onclick = async () => {
+  const b = $("tfFind"); b.disabled = true; b.textContent = "Qidirilmoqda…";
+  $("tfFound").innerHTML = "";
+  try{
+    const d = await post("/api/terminals/discover");
+    $("tfFound").innerHTML = d.devices.map((x, i) => `<li><div class="grow"><b>${esc(x.ip)}</b>${x.port !== 80 ? ":" + x.port : ""} · ${esc(x.model || "Hikvision")}
+        <small>MAC ${esc(x.mac)}${x.terminal ? " · dashboardda: " + esc(x.terminal) : ""}${x.activated ? "" : " · faollashtirilmagan"}</small></div>
+        <button class="btn ghost sm" type="button" data-pick="${i}">Tanlash</button></li>`).join("")
+      || `<li><div class="grow">Tarmoqda Hikvision qurilmasi topilmadi.<small>Terminal yoqilgan va shu kompyuter bilan bitta routerga ulanganini tekshiring.</small></div></li>`;
+    $("tfFound").querySelectorAll("[data-pick]").forEach(p => p.onclick = () => {
+      const x = d.devices[+p.dataset.pick]; $("tfHost").value = x.ip; $("tfPort").value = x.port;
+      if (!$("tfName").value.trim() && x.terminal) $("tfName").value = x.terminal;
+      $("tfFound").innerHTML = "";
+    });
+  }catch(e){ showErr("tfErr", e.message); }
+  finally{ b.disabled = false; b.textContent = "🔍 Tarmoqdan terminalni qidirish"; }
+};
 $("addTerm").onclick = () => termForm(null);
 $("termForm").onsubmit = async ev => {
   ev.preventDefault();
@@ -1061,8 +1145,19 @@ async function loadStaff(){
   $("matchBody").innerHTML = ST.term_users.filter(u => !only || !u.staff_id).map(u => `<tr>
     <td>${tpill(u.terminal)}</td><td class="num">${esc(u.emp)}</td><td>${esc(u.name) || '<span class="muted">—</span>'}</td>
     <td><select class="sel" style="min-width:230px" data-t="${u.terminal_id}" data-e="${esc(u.emp)}">${staffOpts(u.staff_id)}</select>
-    ${u.staff_id ? "" : '<span class="pill p-unl" style="margin-left:6px">bog\'lanmagan</span>'}</td></tr>`).join("")
-    || `<tr class="empty"><td colspan="4">${only ? "Hamma ID lar bog'langan ✓" : "Terminallardan hali ID kelmadi"}</td></tr>`;
+    ${u.staff_id ? "" : '<span class="pill p-unl" style="margin-left:6px">bog\'lanmagan</span>'}</td>
+    <td style="text-align:right;white-space:nowrap">${termActive(u.terminal_id) ? `<button class="btn ghost sm" type="button" data-enr="${u.terminal_id}|${esc(u.emp)}" title="Ism yoki yuz rasmini yangilash">📷 Yuz</button>
+      <button class="btn danger sm" type="button" data-tdel="${u.terminal_id}|${esc(u.emp)}" title="Terminaldan o'chirish">Terminaldan o'chirish</button>` : ""}</td></tr>`).join("")
+    || `<tr class="empty"><td colspan="5">${only ? "Hamma ID lar bog'langan ✓" : "Terminallardan hali ID kelmadi"}</td></tr>`;
+  const tu = v => { const [t, e] = v.split("|"); return ST.term_users.find(u => u.terminal_id === +t && u.emp === e); };
+  $("matchBody").querySelectorAll("[data-enr]").forEach(b => b.onclick = () => enrollForm(tu(b.dataset.enr)));
+  $("matchBody").querySelectorAll("[data-tdel]").forEach(b => b.onclick = async () => {
+    const u = tu(b.dataset.tdel);
+    if (!confirm(`${u.name || "ID " + u.emp} (${u.terminal}, ID ${u.emp}) terminaldan o'chirilsinmi?\n\nU endi terminaldan o'ta olmaydi. Dashboarddagi eski o'tishlari saqlanib qoladi.`)) return;
+    b.disabled = true;
+    try{ await post("/api/terminals/person/delete", {terminal_id: u.terminal_id, emp: u.emp}); }catch(e){ alert(e.message); }
+    loadStaff(); pollState();
+  });
   $("matchBody").querySelectorAll("select").forEach(s => s.onchange = async () => {
     await post("/api/staff/link", {terminal_id: +s.dataset.t, emp: s.dataset.e, staff_id: s.value === "new" ? "new" : (s.value ? +s.value : null)});
     loadStaff(); pollState();
@@ -1103,6 +1198,106 @@ $("sfLinks").addEventListener("change", e => {
     if (u && u.name) $("sfName").value = u.name;
   }
 });
+
+/* --- terminalga odam + Face ID */
+const termActive = tid => { const t = (ST && ST.terminals || []).find(t => t.id === tid); return !t || t.active !== false; };
+let enrEdit = null, enrPhoto = null, enrStream = null;
+function nextEmp(tid){
+  const nums = ST.term_users.filter(u => u.terminal_id === tid && /^\d+$/.test(u.emp)).map(u => +u.emp);
+  return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+function enrSetPhoto(dataUrl){
+  enrPhoto = dataUrl;
+  $("enBox").innerHTML = dataUrl ? `<img src="${dataUrl}" alt="">` : `<span>Yuz rasmi<br>yo'q</span>`;
+}
+function enrStopCam(){
+  if (enrStream){ enrStream.getTracks().forEach(t => t.stop()); enrStream = null; }
+  $("enShot").hidden = true; $("enCam").textContent = "📷 Kamera";
+}
+// rasmni terminal qabul qiladigan JPEG ga keltirish: ≤ 800px, ≤ ~180 KB
+function toJpeg(src, mirror){
+  const w0 = src.videoWidth || src.naturalWidth, h0 = src.videoHeight || src.naturalHeight;
+  const k = Math.min(1, 800 / Math.max(w0, h0));
+  const c = document.createElement("canvas"); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  const g = c.getContext("2d");
+  if (mirror){ g.translate(c.width, 0); g.scale(-1, 1); }
+  g.drawImage(src, 0, 0, c.width, c.height);
+  let q = .9, url = c.toDataURL("image/jpeg", q);
+  while (url.length * .75 > 180 * 1024 && q > .4){ q -= .1; url = c.toDataURL("image/jpeg", q); }
+  return url;
+}
+function enrollForm(u){
+  enrEdit = u || null; enrStopCam(); showErr("enErr", "");
+  const terms = ST.terminals.filter(t => t.active !== false);
+  if (!terms.length){ alert("Avval ishlab turgan terminal qo'shing (Sozlamalar → Terminallar)."); return; }
+  $("enTitle").textContent = u ? `${u.name || "ID " + u.emp} — ism / yuzni yangilash` : "Terminalga Face ID qo'shish";
+  $("enTerm").innerHTML = terms.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  $("enTerm").value = u ? u.terminal_id : terms[0].id; $("enTerm").disabled = !!u;
+  $("enName").value = u ? u.name : "";
+  $("enEmp").value = u ? u.emp : nextEmp(+$("enTerm").value); $("enEmp").readOnly = !!u;
+  $("enStaffF").hidden = !!(u && u.staff_id);
+  $("enStaff").innerHTML = `<option value="new">+ Yangi xodim sifatida qo'shish</option><option value="">— bog'lamaslik —</option>` +
+    ST.staff.map(s => `<option value="${s.id}">${esc(s.name)}${s.code ? " (" + esc(s.code) + ")" : ""}</option>`).join("");
+  enrSetPhoto(null);
+  if (u) $("enBox").innerHTML = `<img src="/face/${encodeURIComponent("t" + u.terminal_id + "-" + u.emp)}?v=${Date.now()}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{innerHTML:'Yangi rasm<br>ixtiyoriy'}))">`;
+  $("enBtn").textContent = u ? "Saqlash" : "Terminalga yozish";
+  openModal("mEnroll"); setTimeout(() => $("enName").focus(), 50);
+}
+$("addEnroll").onclick = () => enrollForm(null);
+$("enTerm").onchange = () => { if (!enrEdit) $("enEmp").value = nextEmp(+$("enTerm").value); };
+$("enPick").onclick = () => { enrStopCam(); $("enFile").click(); };
+$("enFile").onchange = () => {
+  const f = $("enFile").files[0]; $("enFile").value = "";
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { enrSetPhoto(toJpeg(img)); URL.revokeObjectURL(img.src); };
+  img.onerror = () => showErr("enErr", "Bu faylni rasm sifatida ochib bo'lmadi");
+  img.src = URL.createObjectURL(f);
+};
+$("enCam").onclick = async () => {
+  if (enrStream){ enrStopCam(); enrSetPhoto(enrPhoto); return; }
+  showErr("enErr", "");
+  try{
+    enrStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: "user", width: {ideal: 1280}}, audio: false});
+  }catch(e){ showErr("enErr", "Kamerani ochib bo'lmadi. Kamerasi bor qurilmada oching yoki \"Fayl\" orqali rasm tanlang."); return; }
+  const v = document.createElement("video"); v.autoplay = true; v.playsInline = true; v.muted = true; v.srcObject = enrStream;
+  $("enBox").innerHTML = ""; $("enBox").appendChild(v);
+  $("enShot").hidden = false; $("enCam").textContent = "✕ Yopish";
+};
+$("enShot").onclick = () => {
+  const v = $("enBox").querySelector("video");
+  if (!v || !v.videoWidth) return;
+  const url = toJpeg(v, true); enrStopCam(); enrSetPhoto(url);
+};
+$("mEnroll").addEventListener("click", e => { if (e.target.closest("[data-close]") || e.target === $("mEnroll")) enrStopCam(); });
+$("enrForm").onsubmit = async ev => {
+  ev.preventDefault(); showErr("enErr", "");
+  const btn = $("enBtn"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Terminalga yozilmoqda…";
+  try{
+    await post("/api/terminals/person", {terminal_id: +$("enTerm").value, emp: $("enEmp").value.trim(), name: $("enName").value.trim(),
+      photo: enrPhoto, edit: !!enrEdit, staff_id: $("enStaffF").hidden ? null : ($("enStaff").value === "new" ? "new" : ($("enStaff").value ? +$("enStaff").value : null))});
+    enrStopCam(); closeModal($("mEnroll")); await loadStaff(); pollState();
+  }catch(e){ showErr("enErr", e.message); loadStaff(); }
+  finally{ btn.disabled = false; btn.textContent = label; }
+};
+
+/* --- zaxira */
+$("bkUp").onclick = () => { showErr("bkErr", ""); $("bkFile").click(); };
+$("bkFile").onchange = async () => {
+  const f = $("bkFile").files[0]; $("bkFile").value = "";
+  if (!f) return;
+  if (!confirm(`"${f.name}" zaxirasidan tiklansinmi?\n\nShu dashboarddagi HAMMA ma'lumot zaxiradagisi bilan almashtiriladi. Keyin zaxiradagi login/parol bilan kirasiz.`)) return;
+  const b = $("bkUp"); b.disabled = true; b.textContent = "Tiklanmoqda…";
+  try{
+    const r = await fetch("/api/backup/restore", {method: "POST", headers: {"Content-Type": "application/zip"}, body: f});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ("Xato " + r.status));
+    showOk("bkOk", "✓ Tiklandi. Endi zaxiradagi login/parol bilan kiring…");
+    setTimeout(() => location.reload(), 2000);
+  }catch(e){ showErr("bkErr", e.message); }
+  finally{ b.disabled = false; b.textContent = "⬆️ Zaxira faylini tanlash va tiklash"; }
+};
 
 /* --- foydalanuvchilar */
 async function loadUsers(){

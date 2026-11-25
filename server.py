@@ -9,6 +9,7 @@ Qo'shimcha:        --no-browser   --port=8090
 
 Faqat Python standart kutubxonasi ishlatiladi — hech narsa o'rnatish shart emas.
 """
+import base64
 import calendar
 import csv
 import hashlib
@@ -21,8 +22,11 @@ import os
 import random
 import re
 import secrets
+import select
+import socket
 import sqlite3
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -33,11 +37,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(BASE, "data")
+# Bulut (Railway va h.k.): PORT beriladi, ma'lumotlar doimiy diskka (DATA_DIR, masalan /data volume) yoziladi
+CLOUD = bool(os.environ.get("PORT"))
+DATA = os.environ.get("DATA_DIR") or os.path.join(BASE, "data")
 PHOTOS = os.path.join(DATA, "photos")
 FACES = os.path.join(DATA, "faces")
 WEB = os.path.join(BASE, "web")
-CONFIG_PATH = os.path.join(BASE, "config.json")
+CONFIG_PATH = os.path.join(DATA, "config.json") if os.environ.get("DATA_DIR") else os.path.join(BASE, "config.json")
 
 DEFAULTS = {
     "listen_host": "127.0.0.1",
@@ -170,7 +176,7 @@ class Device:
         x = data.decode("utf-8", "replace")
         g = lambda tag: (re.search(f"<{tag}>(.*?)</{tag}>", x) or [None, ""])[1]
         return {"name": g("deviceName"), "model": g("model"), "serial": g("serialNumber"),
-                "firmware": g("firmwareVersion")}
+                "firmware": g("firmwareVersion"), "mac": g("macAddress")}
 
 
 # ----------------------------------------------------------------- baza
@@ -205,6 +211,13 @@ class DB:
             CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, username TEXT, expires REAL);
             CREATE TABLE IF NOT EXISTS billz_days(date TEXT PRIMARY KEY, data TEXT, fetched REAL, final INTEGER);
             """)
+            tcols = [r[1] for r in c.execute("PRAGMA table_info(terminals)")]
+            if "active" not in tcols:
+                # o'chirib qo'yilgan terminal: tarixi qoladi, lekin server unga ulanmaydi
+                c.execute("ALTER TABLE terminals ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+            for col in ("mac", "serial"):  # IP o'zgarsa terminalni tarmoqdan shu bo'yicha topamiz
+                if col not in tcols:
+                    c.execute(f"ALTER TABLE terminals ADD COLUMN {col} TEXT")
             if legacy:
                 # eski (bitta terminalli) bazani ko'chirish: hamma eski o'tishlar 1-terminalga tegishli
                 c.execute("INSERT INTO events(id, terminal_id, serial, time, date, emp, name, att_status, verify, "
@@ -238,7 +251,7 @@ CFG = None
 
 
 def terminals(with_password=False):
-    cols = "id, name, host, port, username, created" + (", password" if with_password else "")
+    cols = "id, name, host, port, username, created, active" + (", password" if with_password else "")
     return db.q(f"SELECT {cols} FROM terminals ORDER BY id")
 
 
@@ -281,6 +294,8 @@ class Poller(threading.Thread):
         self.users_at = 0
         self.stopped = False
         self.primed = False   # birinchi so'rov — eski o'tishlarni yuklash (Telegram'ga yuborilmaydi)
+        self.fails = 0
+        self.searched_at = 0
         self.state = TSTATE.setdefault(self.tid, {})
         self.state.update(connected=False, error=None, need_login=False, last_poll=None)
 
@@ -330,6 +345,7 @@ class Poller(threading.Thread):
     def poll_once(self):
         if not self.state.get("device"):
             self.state["device"] = self.device.info()
+            remember_identity(self.tid, self.state["device"])
         if time.time() - self.users_at > 600:
             self.sync_users()
         last = db.q("SELECT MAX(time) t FROM events WHERE terminal_id=?", (self.tid,))[0]["t"]
@@ -349,16 +365,37 @@ class Poller(threading.Thread):
             tg_notify(new_ids)
         self.primed = True
 
+    def moved(self):
+        """Terminal javob bermasa — IP o'zgargan bo'lishi mumkin: tarmoqdan MAC/seriya bo'yicha qidiramiz."""
+        if time.time() - self.searched_at < 60:
+            return False
+        self.searched_at = time.time()
+        new = relocate_terminal(self.tid)
+        if not new:
+            return False
+        d = self.device
+        self.device = Device(new[0], new[1], d.user, d.password)
+        self.state["device"] = None
+        self.fails = 0
+        return True
+
     def run(self):
         while not self.stopped:
             try:
                 self.poll_once()
+                self.fails = 0
                 self.state.update(connected=True, error=None, need_login=False, last_poll=fmt_time(now_local()))
             except AuthError as e:
+                # IP boshqa qurilmaga o'tib qolgan bo'lishi mumkin — avval terminalimizni qidirib ko'ramiz
+                if self.moved():
+                    continue
                 self.state.update(connected=False, need_login=True,
                                   error=f"{e}. Sozlamalar → Terminallar bo'limida login/parolni yangilang.")
                 return
             except Exception as e:
+                self.fails += 1
+                if self.fails >= 3 and self.moved():
+                    continue
                 self.state.update(connected=False, error=f"Terminalga ulanib bo'lmadi: {e}")
                 time.sleep(5)
             time.sleep(CFG.get("poll_seconds", 2))
@@ -366,6 +403,8 @@ class Poller(threading.Thread):
 
 def start_poller(t):
     stop_poller(t["id"])
+    if not t.get("active", 1):
+        return
     if DEMO:
         TSTATE[t["id"]] = {"connected": True, "error": None, "need_login": False,
                            "last_poll": fmt_time(now_local()), "device": {"model": "DS-K1T343MFWX (demo)"}}
@@ -388,7 +427,8 @@ def stop_poller(tid):
 
 def device_of(tid):
     p = POLLERS.get(tid)
-    return p.device if p else None
+    # ulanmagan terminaldan rasm so'rab sahifani kuttirmaymiz
+    return p.device if p and TSTATE.get(tid, {}).get("connected") else None
 
 
 # ----------------------------------------------------------------- shaxs aniqlash (terminal ID -> xodim)
@@ -728,7 +768,7 @@ class DemoGen(threading.Thread):
         serial = int(time.time())
         while True:
             time.sleep(random.randint(6, 12))
-            ts = terminals()
+            ts = [t for t in terminals() if t["active"]]
             if not ts:
                 continue
             tid = random.choice(ts)["id"]
@@ -1418,7 +1458,8 @@ def validate_new(username, pw):
 
 
 def session_cookie(tok, max_age):
-    return {"Set-Cookie": f"dsid={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}"}
+    sec = "; Secure" if CLOUD else ""   # bulutda faqat HTTPS orqali
+    return {"Set-Cookie": f"dsid={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{sec}"}
 
 
 # ----------------------------------------------------------------- terminal / xodim boshqaruvi
@@ -1466,6 +1507,9 @@ def save_terminal(b):
                 code, res = test_terminal(host, port, user, pw)
                 if code != 200:
                     return code, res
+                if (host, port) != (old["host"], old["port"]):  # boshqa qurilma bo'lishi mumkin — qayta tanib olamiz
+                    db.x("UPDATE terminals SET mac=NULL, serial=NULL WHERE id=?", (tid,))
+                remember_identity(tid, res)
             db.x("UPDATE terminals SET name=?, host=?, port=?, username=?, password=? WHERE id=?",
                  (name, host, port, user, pw, tid))
             if changed or not TSTATE.get(tid, {}).get("connected"):
@@ -1478,6 +1522,7 @@ def save_terminal(b):
             return code, res
         tid = db.x("INSERT INTO terminals(name, host, port, username, password, created) VALUES(?,?,?,?,?,?)",
                    (name, host, port, user, pw, fmt_time(now_local())))
+        remember_identity(tid, res)
         t = db.q("SELECT * FROM terminals WHERE id=?", (tid,))[0]
         start_poller(t)
         TSTATE.setdefault(tid, {})["device"] = res
@@ -1490,6 +1535,396 @@ def delete_terminal(tid):
         for sql in ("DELETE FROM terminals WHERE id=?", "DELETE FROM events WHERE terminal_id=?",
                     "DELETE FROM term_users WHERE terminal_id=?", "DELETE FROM links WHERE terminal_id=?"):
             db.x(sql, (tid,))
+    return 200, {"ok": True}
+
+
+def set_terminal_active(tid, active):
+    with TERM_LOCK:
+        if not db.q("SELECT 1 FROM terminals WHERE id=?", (tid,)):
+            return 404, {"error": "Terminal topilmadi"}
+        db.x("UPDATE terminals SET active=? WHERE id=?", (1 if active else 0, tid))
+        start_poller(db.q("SELECT * FROM terminals WHERE id=?", (tid,))[0])  # o'chirilgan bo'lsa faqat to'xtatadi
+    return 200, {"ok": True}
+
+
+# ----------------------------------------------------------------- terminalni tarmoqdan topish (SADP)
+def _norm_mac(m):
+    return re.sub(r"[^0-9a-f]", "", str(m or "").lower())
+
+
+def _same_serial(a, b):
+    # SADP va deviceInfo seriyani turlicha uzunlikda beradi, lekin oxirgi 9 belgi (masalan LA2086631) bir xil.
+    # MAC ham har doim mos kelmaydi (terminalda bir nechta tarmoq interfeysi bor), shuning uchun asosiysi — seriya.
+    a, b = str(a or "").strip().upper(), str(b or "").strip().upper()
+    return len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]
+
+
+def _local_ips():
+    ips = set()
+    try:
+        ips |= {a[4][0] for a in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}
+    except OSError:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    return sorted(i for i in ips if not i.startswith(("127.", "169.254.")))
+
+
+DISCOVER_LOCK = threading.Lock()
+
+
+def discover(wait=2.5):
+    """Hikvision SADP: lokal tarmoqdagi hamma Hikvision qurilmalari o'z IP, MAC va seriyasini aytadi."""
+    if DEMO:
+        return [{"ip": t["host"], "port": t["port"], "model": "DS-K1T343MFWX (demo)", "mac": "", "serial": "",
+                 "activated": True} for t in terminals()]
+    probe = (f'<?xml version="1.0" encoding="utf-8"?><Probe><Uuid>{str(uuid.uuid4()).upper()}</Uuid>'
+             f'<Types>inquiry</Types></Probe>').encode()
+    with DISCOVER_LOCK:
+        socks = []
+        for ip in _local_ips():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(ip))
+                s.bind((ip, 0))
+                s.setblocking(False)
+                for _ in range(2):
+                    s.sendto(probe, ("239.255.255.250", 37020))
+                socks.append(s)
+            except OSError:
+                continue
+        found = {}
+        end = time.time() + wait
+        try:
+            while socks and time.time() < end:
+                ready, _, _ = select.select(socks, [], [], 0.3)
+                for s in ready:
+                    try:
+                        data, _ = s.recvfrom(65535)
+                    except OSError:
+                        continue
+                    x = data.decode("utf-8", "ignore")
+                    g = lambda k: (re.search(f"<{k}>([^<]*)</{k}>", x) or [None, ""])[1].strip()
+                    mac, ip = _norm_mac(g("MAC")), g("IPv4Address")
+                    if not ip or (mac or ip) in found:
+                        continue
+                    try:
+                        port = int(g("HttpPort") or 80)
+                    except ValueError:
+                        port = 80
+                    found[mac or ip] = {"ip": ip, "port": port, "model": g("DeviceDescription") or g("DeviceType"),
+                                        "mac": mac, "serial": g("DeviceSN"),
+                                        "activated": g("Activated").lower() != "false"}
+        finally:
+            for s in socks:
+                s.close()
+    return sorted(found.values(), key=lambda d: tuple(int(p) if p.isdigit() else 0 for p in d["ip"].split(".")))
+
+
+def remember_identity(tid, info):
+    mac, serial = _norm_mac((info or {}).get("mac")), str((info or {}).get("serial") or "").strip()
+    if mac or serial:
+        db.x("UPDATE terminals SET mac=COALESCE(NULLIF(?, ''), mac), serial=COALESCE(NULLIF(?, ''), serial) "
+             "WHERE id=?", (mac, serial, tid))
+
+
+def relocate_terminal(tid):
+    """Terminal IP si o'zgargan bo'lsa (DHCP) — yangi IP ni topib, bazada yangilaydi. (host, port) yoki None."""
+    if DEMO:
+        return None
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows:
+        return None
+    t = rows[0]
+    found = discover()
+    mac = _norm_mac(t.get("mac"))
+    cand = [d for d in found if (mac and d["mac"] == mac) or _same_serial(d["serial"], t.get("serial"))]
+    if not cand and not mac and not t.get("serial"):
+        # bu terminal hali "tanib olinmagan" (eski yozuv): boshqa terminalga tegishli bo'lmagan qurilmalardan
+        # qaysi biri bizning login/parolni qabul qilsa — o'sha
+        used = {(x["host"], x["port"]) for x in terminals() if x["id"] != tid}
+        others = db.q("SELECT serial FROM terminals WHERE id!=?", (tid,))
+        for d in found[:5]:
+            if (d["ip"], d["port"]) in used or (d["ip"], d["port"]) == (t["host"], t["port"]) or \
+                    any(_same_serial(o["serial"], d["serial"]) for o in others):
+                continue
+            try:
+                info = Device(d["ip"], d["port"], t["username"], t["password"], timeout=5).info()
+            except Exception:
+                continue
+            remember_identity(tid, info)
+            cand = [d]
+            break
+    if not cand or (cand[0]["ip"], cand[0]["port"]) == (t["host"], t["port"]):
+        return None
+    d = cand[0]
+    db.x("UPDATE terminals SET host=?, port=? WHERE id=?", (d["ip"], d["port"], tid))
+    print(f"[IP] {t['name']}: {t['host']} -> {d['ip']} (terminal IP si o'zgargan, avtomatik yangilandi)", flush=True)
+    return d["ip"], d["port"]
+
+
+def discover_info():
+    rows = db.q("SELECT id, name, host, port, mac, serial FROM terminals")
+    out = []
+    for d in discover():
+        t = next((r for r in rows if _same_serial(r["serial"], d["serial"])), None) or \
+            next((r for r in rows if r["mac"] and _norm_mac(r["mac"]) == d["mac"]), None) or \
+            next((r for r in rows if (r["host"], r["port"]) == (d["ip"], d["port"])), None)
+        out.append({**{k: d[k] for k in ("ip", "port", "model", "activated")},
+                    "mac": "-".join(d["mac"][i:i + 2] for i in range(0, len(d["mac"]), 2)),
+                    "terminal": t["name"] if t else None})
+    return {"devices": out}
+
+
+# ----------------------------------------------------------------- zaxira (boshqa kompyuter/serverga ko'chirish)
+BACKUP_RE = re.compile(r"^(attendance\.db|config\.json|photos/[\w.-]+\.jpg|faces/[\w.-]+\.(jpg|none))$")
+
+
+def make_backup():
+    """Baza (izchil nusxa), config.json, rasmlar va yuzlar — bitta zip."""
+    import zipfile
+    buf = io.BytesIO()
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        dst = sqlite3.connect(tmp)
+        with db.lock:
+            db.conn.backup(dst)
+        dst.close()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(tmp, "attendance.db")
+            if os.path.exists(CONFIG_PATH):
+                z.write(CONFIG_PATH, "config.json")
+            for sub, folder in (("photos", PHOTOS), ("faces", FACES)):
+                for f in sorted(os.listdir(folder)):
+                    name = f"{sub}/{f}"
+                    if BACKUP_RE.match(name):
+                        z.write(os.path.join(folder, f), name, compress_type=zipfile.ZIP_STORED)
+    finally:
+        os.remove(tmp)
+    return buf.getvalue()
+
+
+def restore_backup(raw):
+    """Zaxiradan tiklash: hozirgi baza, sozlamalar va rasmlar ALMASHTIRILADI."""
+    import zipfile
+    global db, CFG
+    if DEMO:
+        raise ValueError("Demo rejimida tiklab bo'lmaydi")
+    try:
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        names = [i.filename for i in z.infolist() if not i.is_dir()]
+    except zipfile.BadZipFile:
+        raise ValueError("Bu zaxira (zip) fayli emas")
+    if "attendance.db" not in names:
+        raise ValueError("Zaxirada attendance.db yo'q")
+    bad = [n for n in names if not BACKUP_RE.match(n)]
+    if bad:
+        raise ValueError(f"Zaxirada notanish fayl bor: {bad[0]}")
+    if sum(i.file_size for i in z.infolist()) > 2 * 1024 ** 3:
+        raise ValueError("Zaxira juda katta")
+    fd, tmp = tempfile.mkstemp(suffix=".db", dir=DATA)
+    os.close(fd)
+    with open(tmp, "wb") as f:
+        f.write(z.read("attendance.db"))
+    try:
+        c = sqlite3.connect(tmp)
+        ok = c.execute("PRAGMA integrity_check").fetchone()[0] == "ok" and \
+            c.execute("SELECT 1 FROM sqlite_master WHERE name='terminals'").fetchone()
+        accounts = c.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] if ok else 0
+        c.close()
+    except sqlite3.DatabaseError:
+        ok = False
+    if not ok or not accounts:
+        os.remove(tmp)
+        raise ValueError("Zaxiradagi baza buzilgan yoki unda foydalanuvchi yo'q")
+    with TERM_LOCK:
+        for tid in list(POLLERS):
+            stop_poller(tid)
+        with db.lock:
+            db.conn.close()
+            os.replace(tmp, os.path.join(DATA, "attendance.db"))
+        for sub, folder in (("photos", PHOTOS), ("faces", FACES)):
+            for f in os.listdir(folder):
+                os.remove(os.path.join(folder, f))
+            for n in names:
+                if n.startswith(sub + "/"):
+                    with open(os.path.join(folder, n.split("/", 1)[1]), "wb") as f:
+                        f.write(z.read(n))
+        if "config.json" in names:
+            cfg = dict(DEFAULTS)
+            cfg.update(json.loads(z.read("config.json").decode("utf-8-sig")))
+            save_config(cfg)
+        CFG = load_config()
+        db = DB(os.path.join(DATA, "attendance.db"))
+        BILLZ_AUTH.update(token=None, at=0, secret=None)
+        BILLZ_CACHE.clear()
+        for t in terminals(with_password=True):
+            start_poller(t)
+    print(f"Zaxiradan tiklandi: {len(names)} ta fayl", flush=True)
+
+
+# ----------------------------------------------------------------- terminalga xodim + Face ID yozish
+EMP_RE = re.compile(r"^[0-9A-Za-z_-]{1,32}$")
+
+
+def _isapi_err(j, st):
+    sub = str(j.get("subStatusCode") or j.get("errorMsg") or j.get("statusString") or f"HTTP {st}")
+    known = {
+        "employeeNoAlreadyExist": "Bu ID terminalda band",
+        "deviceUserAlreadyExistFace": "Bu odamning yuzi terminalda allaqachon bor",
+        "faceDataModeling": "Rasmdan yuz modeli yasab bo'lmadi",
+        "noFace": "Rasmda yuz topilmadi",
+        "facePicQualityLow": "Rasm sifati past",
+        "faceScoreLow": "Rasm sifati past",
+        "multiFace": "Rasmda bir nechta yuz bor",
+        "badPicSize": "Rasm o'lchami mos emas",
+        "pictureSizeExceedLimit": "Rasm juda katta",
+    }
+    for k, v in known.items():
+        if k.lower() in sub.lower():
+            return f"{v} ({sub})"
+    return sub
+
+
+def _face_multipart(meta, img):
+    b = "----davomat" + uuid.uuid4().hex
+    body = (f"--{b}\r\nContent-Disposition: form-data; name=\"FaceDataRecord\"\r\n"
+            f"Content-Type: application/json\r\n\r\n{json.dumps(meta)}\r\n"
+            f"--{b}\r\nContent-Disposition: form-data; name=\"img\"; filename=\"face.jpg\"\r\n"
+            f"Content-Type: image/jpeg\r\n\r\n").encode() + img + f"\r\n--{b}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={b}"
+
+
+def _isapi_json(dev, method, path, obj=None, raw=None, ctype="application/json"):
+    body = raw if raw is not None else json.dumps(obj).encode("utf-8")
+    st, _, data = dev.request(method, path, body, ctype=ctype, fatal=False)
+    try:
+        j = json.loads(data.decode("utf-8", "replace") or "{}")
+    except ValueError:
+        j = {}
+    return st, j
+
+
+def _ok_isapi(st, j):
+    return st == 200 and str(j.get("statusCode", 1)) == "1"
+
+
+def _cache_face(tid, emp, img):
+    safe = re.sub(r"[^\w-]", "_", emp)
+    fp = os.path.join(FACES, f"{tid}_{safe}.jpg")
+    for f in (fp, fp + ".none"):
+        if os.path.exists(f):
+            os.remove(f)
+    if img:
+        with open(fp, "wb") as f:
+            f.write(img)
+
+
+def enroll_person(b):
+    """Terminalga yangi odam qo'shish yoki mavjudini yangilash (ism + yuz rasmi)."""
+    try:
+        tid = int(b.get("terminal_id") or 0)
+    except ValueError:
+        return 400, {"error": "Terminalni tanlang"}
+    emp = str(b.get("emp") or "").strip()
+    name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()
+    edit = bool(b.get("edit"))
+    img = None
+    if b.get("photo"):
+        try:
+            img = base64.b64decode(str(b["photo"]).split(",", 1)[-1], validate=True)
+        except Exception:
+            return 400, {"error": "Rasm o'qilmadi"}
+        if not img.startswith(b"\xff\xd8"):
+            return 400, {"error": "Rasm JPEG formatida bo'lsin"}
+        if len(img) > 200 * 1024:
+            return 400, {"error": "Rasm 200 KB dan katta — kichikroq rasm tanlang"}
+    t = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not t:
+        return 404, {"error": "Terminal topilmadi"}
+    t = t[0]
+    if not t["active"]:
+        return 409, {"error": f"{t['name']} terminali o'chirib qo'yilgan"}
+    if not EMP_RE.match(emp):
+        return 400, {"error": "ID raqami faqat raqam/harf bo'lsin (masalan 12)"}
+    if not 1 <= len(name) <= 32:
+        return 400, {"error": "Ism familiyani kiriting (32 belgigacha — terminal shuncha qabul qiladi)"}
+    if not edit and not img:
+        return 400, {"error": "Yuz rasmini qo'shing (kamera yoki fayl)"}
+    if not edit and db.q("SELECT 1 FROM term_users WHERE terminal_id=? AND emp=?", (tid, emp)):
+        return 409, {"error": f"ID {emp} {t['name']} terminalida band. Boshqa raqam tanlang."}
+
+    if not DEMO:
+        dev = device_of(tid)
+        if not dev or not TSTATE.get(tid, {}).get("connected"):
+            return 502, {"error": f"{t['name']} terminaliga hozir ulanib bo'lmayapti. Biroz kutib qayta urining."}
+        user = {"UserInfo": {"employeeNo": emp, "name": name, "userType": "normal",
+                             "Valid": {"enable": True, "beginTime": "2020-01-01T00:00:00",
+                                       "endTime": "2037-12-31T23:59:59", "timeType": "local"},
+                             "doorRight": "1", "RightPlan": [{"doorNo": 1, "planTemplateNo": "1"}]}}
+        try:
+            if edit:
+                st, j = _isapi_json(dev, "PUT", "/ISAPI/AccessControl/UserInfo/Modify?format=json", user)
+            else:
+                st, j = _isapi_json(dev, "POST", "/ISAPI/AccessControl/UserInfo/Record?format=json", user)
+            if not _ok_isapi(st, j):
+                return 400, {"error": "Terminal xodimni qabul qilmadi: " + _isapi_err(j, st)}
+            if img:
+                meta = {"faceLibType": "blackFD", "FDID": "1", "FPID": emp}
+                raw, ctype = _face_multipart(meta, img)
+                st, j = _isapi_json(dev, "POST", "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json",
+                                    raw=raw, ctype=ctype)
+                if not _ok_isapi(st, j) and "exist" in str(j.get("subStatusCode", "")).lower():
+                    raw, ctype = _face_multipart(meta, img)   # yuz bor edi — almashtiramiz
+                    st, j = _isapi_json(dev, "PUT", "/ISAPI/Intelligent/FDLib/FDSetUp?format=json",
+                                        raw=raw, ctype=ctype)
+                if not _ok_isapi(st, j):
+                    msg = "Xodim terminalga yozildi, lekin yuz rasmi qabul qilinmadi: " + _isapi_err(j, st) + \
+                          ". Yuz aniq, yorug' joyda, to'g'ridan va yolg'iz tushgan rasm tanlang."
+                    upsert_term_user(tid, emp, name)
+                    return 400, {"error": msg, "user_saved": True}
+        except AuthError:
+            return 403, {"error": "Terminal login/paroli noto'g'ri"}
+        except Exception as e:
+            return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
+    upsert_term_user(tid, emp, name)
+    if img:
+        _cache_face(tid, emp, img)
+    sid = b.get("staff_id")
+    if sid == "new":
+        sid = db.x("INSERT INTO staff(name, code, dept, created) VALUES(?,?,?,?)", (name, "", "", fmt_time(now_local())))
+    if sid not in (None, "", 0):
+        db.x("INSERT OR REPLACE INTO links(terminal_id, emp, staff_id) VALUES(?,?,?)", (tid, emp, int(sid)))
+    return 200, {"ok": True, "emp": emp}
+
+
+def remove_person(b):
+    """Terminaldan odamni (yuzi bilan) o'chiradi. Dashboarddagi eski o'tishlari qoladi."""
+    try:
+        tid, emp = int(b.get("terminal_id") or 0), str(b.get("emp") or "").strip()
+    except ValueError:
+        return 400, {"error": "Noto'g'ri so'rov"}
+    if not EMP_RE.match(emp):
+        return 400, {"error": "Noto'g'ri ID"}
+    if not DEMO:
+        dev = device_of(tid)
+        if not dev or not TSTATE.get(tid, {}).get("connected"):
+            return 502, {"error": "Terminalga hozir ulanib bo'lmayapti"}
+        try:
+            st, j = _isapi_json(dev, "PUT", "/ISAPI/AccessControl/UserInfo/Delete?format=json",
+                                {"UserInfoDelCond": {"EmployeeNoList": [{"employeeNo": emp}]}})
+        except Exception as e:
+            return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
+        if not _ok_isapi(st, j):
+            return 400, {"error": "Terminal o'chirmadi: " + _isapi_err(j, st)}
+    db.x("DELETE FROM term_users WHERE terminal_id=? AND emp=?", (tid, emp))
+    _cache_face(tid, emp, None)
     return 200, {"ok": True}
 
 
@@ -1521,7 +1956,9 @@ def staff_info():
         sid = ctx["links"].get((t, e))
         tusers.append({"terminal_id": t, "terminal": tn[t], "emp": e, "name": name,
                        "staff_id": sid if sid in ctx["staff"] else None})
-    return {"staff": staff, "term_users": tusers, "terminals": [{"id": k, "name": v} for k, v in sorted(tn.items())]}
+    act = {t["id"]: bool(t["active"]) for t in terminals()}
+    return {"staff": staff, "term_users": tusers,
+            "terminals": [{"id": k, "name": v, "active": act.get(k, True)} for k, v in sorted(tn.items())]}
 
 
 def save_staff(b):
@@ -1642,7 +2079,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "repeat_gap_seconds": CFG.get("repeat_gap_seconds"),
                                        "terminals": [{k: t[k] for k in ("id", "name", "host", "connected", "error",
                                                                          "need_login", "last_poll", "model",
-                                                                         "events_total", "last_event")}
+                                                                         "events_total", "last_event", "active")}
                                                      for t in terminals_info()],
                                        "unlinked": unlinked_count(make_ctx())})
             if p == "/api/terminals":
@@ -1680,6 +2117,12 @@ class Handler(BaseHTTPRequestHandler):
                 evs = [{"id": e["id"], "time": e["time"], "kind": e["kind"], "terminal": e["terminal"]}
                        for e in (g["evs"] if g else [])]
                 return self.send(200, {"events": evs})
+            if p == "/api/backup.zip":
+                data = make_backup()
+                stamp = now_local().strftime("%Y-%m-%d_%H%M")
+                return self.send(200, data, "application/zip",
+                                 {"Content-Disposition": f'attachment; filename="davomat_zaxira_{stamp}.zip"',
+                                  "Cache-Control": "no-store"})
             if p == "/api/export.csv":
                 d1, d2 = qs.get("from") or today, qs.get("to") or today
                 return self.send(200, export_csv(d1, d2, tid), "text/csv; charset=utf-8",
@@ -1698,8 +2141,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send(500, {"error": str(e)})
 
+    def client_ip(self):
+        if CLOUD:  # proksi orqasida — haqiqiy IP X-Forwarded-For ning oxirgi (proksi qo'shgan) qiymati
+            xff = [x.strip() for x in (self.headers.get("X-Forwarded-For") or "").split(",") if x.strip()]
+            if xff:
+                return xff[-1]
+        return self.client_address[0]
+
     def do_POST(self):
         p = urlsplit(self.path).path
+        if p == "/api/backup/restore":
+            return self.restore_upload()
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
@@ -1707,7 +2159,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {"error": "Noto'g'ri so'rov"})
         username = str(body.get("username") or "").strip()
         pw = str(body.get("password") or "")
-        ip = self.client_address[0]
+        ip = self.client_ip()
         try:
             if p == "/api/auth/setup":
                 with LOGIN_LOCK:
@@ -1770,6 +2222,14 @@ class Handler(BaseHTTPRequestHandler):
                     LOGIN_LOCK.release()
             if p == "/api/terminals/delete":
                 return self.send(*delete_terminal(int(body.get("id") or 0)))
+            if p == "/api/terminals/active":
+                return self.send(*set_terminal_active(int(body.get("id") or 0), bool(body.get("active"))))
+            if p == "/api/terminals/discover":
+                return self.send(200, discover_info())
+            if p == "/api/terminals/person":
+                return self.send(*enroll_person(body))
+            if p == "/api/terminals/person/delete":
+                return self.send(*remove_person(body))
             if p == "/api/staff/save":
                 return self.send(*save_staff(body))
             if p == "/api/staff/delete":
@@ -1815,6 +2275,22 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send(500, {"error": str(e)})
 
+    def restore_upload(self):
+        if not self.session_user():
+            return self.send(401, {"error": "Avval tizimga kiring"})
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if not 0 < n <= 500 * 1024 * 1024:
+            return self.send(400, {"error": "Zaxira fayli bo'sh yoki juda katta"})
+        raw = self.rfile.read(n)
+        try:
+            restore_backup(raw)
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        return self.send(200, {"ok": True}, extra=session_cookie("", 0))
+
     def login_ok(self, username):
         tok = secrets.token_urlsafe(32)
         db.x("DELETE FROM sessions WHERE expires<?", (time.time(),))
@@ -1825,6 +2301,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global db, CFG
+    os.makedirs(DATA, exist_ok=True)
     CFG = load_config()
     os.makedirs(PHOTOS, exist_ok=True)
     os.makedirs(FACES, exist_ok=True)
@@ -1846,13 +2323,15 @@ def main():
         for t in terminals(with_password=True):
             start_poller(t)
     host, port = CFG["listen_host"], CFG["listen_port"]
+    if CLOUD:
+        host, port = "0.0.0.0", int(os.environ["PORT"])
     for a in sys.argv:
         if a.startswith("--port="):
             port = int(a.split("=", 1)[1])
     srv = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{'localhost' if host in ('0.0.0.0', '127.0.0.1') else host}:{port}"
     print(f"Dashboard: {url}   (to'xtatish: Ctrl+C)")
-    if "--no-browser" not in sys.argv:
+    if "--no-browser" not in sys.argv and not CLOUD:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()

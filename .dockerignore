@@ -1,0 +1,7 @@
+.git
+.claude
+data
+config.json
+*.db
+__pycache__
+*.pyc
