@@ -2276,7 +2276,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {"error": str(e)})
 
     def restore_upload(self):
-        if not self.session_user():
+        # Yangi (hali foydalanuvchisi yo'q) serverga ko'chirish: birinchi zaxirani loginsiz qabul qilamiz —
+        # xuddi "birinchi admin yaratish" sahifasi kabi. Foydalanuvchi bo'lgach — faqat login bilan.
+        fresh = not db.q("SELECT 1 FROM accounts LIMIT 1")
+        if not fresh and not self.session_user():
             return self.send(401, {"error": "Avval tizimga kiring"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
