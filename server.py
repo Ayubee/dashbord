@@ -1782,9 +1782,9 @@ OY_STATE = {"last_ok": None, "last_error": None, "last_added": 0, "last_rows": 0
 OY_LOCK = threading.Lock()
 OY_AUTH = ("bearer", "token", "header", "query", "none")
 OY_F = {   # maydon nomi (kichik harf, _ - . siz) -> qaysi ma'lumot
-    "emp": ("employeenostring", "employeeno", "employeeid", "employeecode", "empno", "empid", "emp", "employee",
+    "emp": ("terminalempno", "terminalemployeeno", "employeenostring", "employeeno", "employeeid", "employeecode", "empno", "empid", "emp", "employee",
             "workerid", "staffid", "personid", "personno", "userid", "cardno", "tabelno", "tabel", "code", "xodimid"),
-    "name": ("name", "fullname", "fio", "employeename", "personname", "workername", "staffname", "username",
+    "name": ("terminalusername", "name", "fullname", "fio", "employeename", "personname", "workername", "staffname", "username",
              "employeefullname", "xodim", "ism"),
     "time": ("datetime", "time", "eventtime", "eventdatetime", "timestamp", "ts", "createdat", "created", "checktime",
              "punchtime", "passtime", "vaqt", "at", "date"),
@@ -1795,6 +1795,7 @@ OY_F = {   # maydon nomi (kichik harf, _ - . siz) -> qaysi ma'lumot
     "photo": ("pictureurl", "picurl", "picture", "photourl", "photo", "imageurl", "image", "img", "snapshot",
               "snapshoturl", "faceurl", "rasm"),
     "verify": ("currentverifymode", "verifymode", "verify", "method"),
+    "term": ("terminalname", "terminal", "devicename", "device"),
 }
 
 
@@ -1928,6 +1929,9 @@ def oy_parse(raw):
     if "emp" not in m or "time" not in m:
         raise OyError("Javobda o'tishlar ro'yxati topildi, lekin xodim ID si va vaqt maydonlari aniqlanmadi. "
                       "Maydonlar: " + ", ".join(sorted(rows[0])[:30]))
+    keys = set().union(*rows[:50])
+    names = [n for n in OY_F["name"] if n in keys]      # ism bo'sh bo'lsa keyingi mos maydon
+    terms = [n for n in OY_F["term"] if n in keys]      # "terminal" (qisqa nom) va "terminalName"
     out = []
     for r in rows:
         emp = str(r.get(m["emp"]) or "").strip()
@@ -1941,7 +1945,9 @@ def oy_parse(raw):
         except (TypeError, ValueError):
             serial = None
         rid = r.get(m["rid"]) if m.get("rid") else None
-        out.append({"emp": emp, "name": str(r.get(m.get("name"), "") or "")[:64], "time": t, "serial": serial,
+        name = next((str(r[n]).strip() for n in names if r.get(n) not in (None, "")), "")
+        out.append({"emp": emp, "name": name[:64], "time": t, "serial": serial,
+                    "terms": [str(r[n]) for n in terms if r.get(n) not in (None, "")],
                     "rid": "" if rid is None else str(rid)[:64],
                     "status": _oy_status(r.get(m["status"])) if m.get("status") else "",
                     "verify": str(r.get(m.get("verify"), "") or "")[:32],
@@ -1951,6 +1957,8 @@ def oy_parse(raw):
 
 def _oy_url(c, d1, d2):
     u = c["url"].strip()
+    if re.search(r"/ext/v1/?$", u):   # oyliklar API'sining asosiy manzili berilsa — xom o'tishlar
+        u = u.rstrip("/") + "/davomat/events"
     rep = {"{from}": d1, "{to}": d2, "{date}": d2, "{since}": d1}
     if any(k in u for k in rep):
         for k, v in rep.items():
@@ -1983,6 +1991,8 @@ def _oy_get(c, url, limit=30 << 20, timeout=40):
         body = e.read(400).decode("utf-8", "replace")
         if e.code in (401, 403):
             raise OyError(f"Oyliklar kalitni qabul qilmadi ({e.code}). Kalit va kirish usulini tekshiring. {body[:150]}")
+        if e.code == 429:
+            raise OyError("Oyliklar so'rovlar sonini cheklab qo'ydi (429). Bir daqiqadan keyin qayta urinib ko'ring.")
         if e.code == 404:
             raise OyError("API manzili topilmadi (404). Oyliklar egasi bergan manzilni to'liq yozing.")
         raise OyError(f"Oyliklar xato qaytardi ({e.code}): {body[:200]}")
@@ -2015,11 +2025,20 @@ def _oy_photo(c, ref):
     return data if data[:2] == b"\xff\xd8" else None
 
 
+def _oy_tmap():
+    return {_oy_norm(t["name"]): t["id"] for t in db.q("SELECT id, name FROM terminals")}
+
+
+def _oy_tid(c, e, tmap):
+    return next((tmap[_oy_norm(x)] for x in e.get("terms") or [] if _oy_norm(x) in tmap), c["terminal_id"])
+
+
 def oy_store(c, evs):
     """Yangi o'tishlarni bazaga yozadi. Ofis kompyuteridan kelgan (yoki terminaldan o'qilgan) xuddi shu o'tish
     ikkinchi marta yozilmaydi: shu terminal, shu ID, ±3 soniya ichida o'tish bo'lsa — o'tkazib yuboriladi."""
-    tid, new, photos = c["terminal_id"], [], 0
+    new, photos, tmap = [], 0, _oy_tmap()
     for e in sorted(evs, key=lambda e: e["time"]):
+        tid = _oy_tid(c, e, tmap)
         t0 = parse_time(e["time"])
         lo, hi = fmt_time(t0 - timedelta(seconds=3))[:19], fmt_time(t0 + timedelta(seconds=3))[:19]
         if db.q("SELECT 1 FROM events WHERE terminal_id=? AND emp=? AND substr(time,1,19) BETWEEN ? AND ? LIMIT 1",
@@ -2122,8 +2141,14 @@ def oy_test(b):
     d2 = now_local().date()
     evs, m = oy_fetch(c, (d2 - timedelta(days=6)).isoformat(), d2.isoformat())
     evs.sort(key=lambda e: e["time"], reverse=True)
-    return 200, {"ok": True, "rows": len(evs), "fields": m,
-                 "sample": [{k: e[k] for k in ("emp", "name", "time", "status")} | {"photo": bool(e["photo"])}
+    tmap, tn = _oy_tmap(), {t["id"]: t["name"] for t in db.q("SELECT id, name FROM terminals")}
+    terms = {}
+    for e in evs:
+        k = (e["terms"][-1] if e["terms"] else "—")
+        terms[k] = tn.get(_oy_tid(c, e, tmap), "?")
+    return 200, {"ok": True, "rows": len(evs), "fields": m, "terminals": terms,
+                 "sample": [{k: e[k] for k in ("emp", "name", "time", "status")} | {"photo": bool(e["photo"]),
+                            "term": tn.get(_oy_tid(c, e, tmap), "")}
                             for e in evs[:8]]}
 
 

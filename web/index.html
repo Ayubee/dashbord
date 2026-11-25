@@ -804,7 +804,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               <div class="ferr" id="oyStErr"></div><div class="okmsg" id="oyStOk"></div>
             </div>
             <form id="oyForm" style="max-width:640px" autocomplete="off">
-              <label class="field"><span>API manzili (oyliklar egasi beradi)</span><input id="oyUrl" autocapitalize="off" spellcheck="false" placeholder="https://oyliklar-production.up.railway.app/api/..."></label>
+              <label class="field"><span>API manzili (oyliklar egasi beradi)</span><input id="oyUrl" autocapitalize="off" spellcheck="false" placeholder="https://oyliklar-production.up.railway.app/ext/v1/davomat/events"></label>
               <p class="muted" style="margin:-4px 0 12px;font-size:12.5px">Davr manzilga <code>?from=YYYY-MM-DD&amp;to=YYYY-MM-DD</code> qilib qo'shiladi. API boshqa nom ishlatsa, manzil ichida <code>{from}</code>, <code>{to}</code> yoki <code>{date}</code> deb yozing.</p>
               <div class="row2">
                 <label class="field"><span>Kalit qanday yuboriladi</span><select id="oyAuth">
@@ -818,7 +818,7 @@ td small,.sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
               </div>
               <label class="field" id="oyKeyF"><span id="oyKeyLbl">API kaliti (token)</span><input id="oyKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Oyliklar bergan kalit"></label>
               <div class="row2">
-                <label class="field"><span>Qaysi terminalning o'tishlari</span><select id="oyTerm"></select></label>
+                <label class="field"><span>Asosiy terminal (oyliklardagi terminal nomi bizdagisiga mos kelmasa)</span><select id="oyTerm"></select></label>
                 <label class="field"><span>Necha soniyada tekshiriladi</span><input id="oyInt" type="number" min="20" max="3600" value="60"></label>
               </div>
               <label class="field" id="oyBackF"><span>Ulanganda o'tgan kunlarni ham yuklash</span><select id="oyBack"><option value="1">Faqat bugun</option><option value="7">Oxirgi 7 kun</option><option value="31" selected>Oxirgi 31 kun</option><option value="62">Oxirgi 62 kun</option></select></label>
@@ -1885,7 +1885,7 @@ $("sdOff").onclick = async () => {
 };
 
 /* --- oyliklar API */
-const OY_FN = {emp: "Xodim ID", name: "Ism", time: "Vaqt", date: "Sana", status: "Kirdi/ketdi", serial: "Tartib raqami", rid: "Yozuv ID", photo: "Rasm", verify: "Usul"};
+const OY_FN = {emp: "Xodim ID", name: "Ism", time: "Vaqt", date: "Sana", status: "Kirdi/ketdi", serial: "Tartib raqami", rid: "Yozuv ID", photo: "Rasm", verify: "Usul", term: "Terminal"};
 function oyAuthUi(){
   const a = $("oyAuth").value;
   $("oyHdrF").hidden = a !== "header"; $("oyPrmF").hidden = a !== "query"; $("oyKeyF").hidden = a === "none";
@@ -1928,8 +1928,9 @@ $("oyTest").onclick = async () => {
     const st = {checkIn: "Kirdi", checkOut: "Ketdi", breakIn: "Kirdi", breakOut: "Ketdi", overtimeIn: "Kirdi", overtimeOut: "Ketdi"};
     $("oyPrev").innerHTML = `<div class="okmsg" style="display:block">✓ API ishladi — oxirgi 7 kunda ${d.rows} ta o'tish topildi</div>
       <div style="margin:8px 0">${oyFields(d.fields)}</div>
-      ${d.sample.length ? `<div class="tablewrap"><table><thead><tr><th>ID</th><th>Ism</th><th>Vaqt</th><th>Kirdi/ketdi</th><th>Rasm</th></tr></thead><tbody>${
-        d.sample.map(e => `<tr><td class="num">${esc(e.emp)}</td><td>${esc(e.name) || '<span class="muted">—</span>'}</td><td class="num">${esc(fmtDT(e.time))}</td><td>${st[e.status] || '<span class="muted">—</span>'}</td><td>${e.photo ? "✓" : '<span class="muted">—</span>'}</td></tr>`).join("")
+      ${Object.keys(d.terminals || {}).length ? `<div style="margin:0 0 8px;font-size:13px">Terminallar: ${Object.entries(d.terminals).map(([a, b]) => `<span class="tp" style="margin-right:10px">oyliklarda «${esc(a)}» → bizda <b>${esc(b)}</b></span>`).join("")}</div>` : ""}
+      ${d.sample.length ? `<div class="tablewrap"><table><thead><tr><th>ID</th><th>Ism</th><th>Vaqt</th><th>Terminal</th><th>Kirdi/ketdi</th><th>Rasm</th></tr></thead><tbody>${
+        d.sample.map(e => `<tr><td class="num">${esc(e.emp)}</td><td>${esc(e.name) || '<span class="muted">—</span>'}</td><td class="num">${esc(fmtDT(e.time))}</td><td>${esc(e.term)}</td><td>${st[e.status] || '<span class="muted">—</span>'}</td><td>${e.photo ? "✓" : '<span class="muted">—</span>'}</td></tr>`).join("")
       }</tbody></table></div>` : ""}`;
   }catch(e){ showErr("oyErr", e.message); }
   finally{ b.disabled = false; b.textContent = txt; }
