@@ -236,6 +236,10 @@ class DB:
             for col in ("mac", "serial"):  # IP o'zgarsa terminalni tarmoqdan shu bo'yicha topamiz
                 if col not in tcols:
                     c.execute(f"ALTER TABLE terminals ADD COLUMN {col} TEXT")
+            ecols = [r[1] for r in c.execute("PRAGMA table_info(events)")]
+            for col in ("manual_kind", "manual_by", "manual_at"):  # holatni qo'lda tuzatish (terminaldagi asl yozuv o'zgarmaydi)
+                if col not in ecols:
+                    c.execute(f"ALTER TABLE events ADD COLUMN {col} TEXT")
             if legacy:
                 # eski (bitta terminalli) bazani ko'chirish: hamma eski o'tishlar 1-terminalga tegishli
                 c.execute("INSERT INTO events(id, terminal_id, serial, time, date, emp, name, att_status, verify, "
@@ -863,12 +867,15 @@ def key_pairs(key, ctx):
 
 
 def classify(evs):
-    """Bir kishining bir kundagi o'tishlari (vaqt bo'yicha) -> keldi/ketdi/takror."""
+    """Bir kishining bir kundagi o'tishlari (vaqt bo'yicha) -> keldi/ketdi/takror.
+    Qo'lda tuzatilgan holat (manual_kind) hammasidan ustun turadi."""
     gap = CFG.get("repeat_gap_seconds", 60)
     prev_t, last_real = None, None
     for e in evs:
         t = parse_time(e["time"])
-        if prev_t is not None and (t - prev_t).total_seconds() < gap:
+        if e.get("manual_kind") in MANUAL_KINDS:
+            k = e["manual_kind"]
+        elif prev_t is not None and (t - prev_t).total_seconds() < gap:
             k = "repeat"
         elif e["att_status"] in IN_ST:
             k = "in"
@@ -882,8 +889,32 @@ def classify(evs):
         e["kind"] = k
 
 
+MANUAL_KINDS = ("in", "out", "repeat")
+
+
+def set_event_kind(b, me):
+    """O'tish holatini qo'lda o'zgartirish: in / out / repeat, yoki "" — terminal holatiga qaytarish."""
+    try:
+        eid = int(b.get("id") or 0)
+    except (TypeError, ValueError):
+        eid = 0
+    kind = str(b.get("kind") or "")
+    if kind and kind not in MANUAL_KINDS:
+        return 400, {"error": "Holat noto'g'ri"}
+    if not db.q("SELECT 1 FROM events WHERE id=?", (eid,)):
+        return 404, {"error": "O'tish topilmadi"}
+    if kind:
+        db.x("UPDATE events SET manual_kind=?, manual_by=?, manual_at=? WHERE id=?",
+             (kind, me, fmt_time(now_local()), eid))
+    else:
+        db.x("UPDATE events SET manual_kind=NULL, manual_by=NULL, manual_at=NULL WHERE id=?", (eid,))
+    print(f"[tuzatish] o'tish #{eid}: {kind or 'avtomatik'} ({me})", flush=True)
+    return 200, {"ok": True}
+
+
 def day_groups(d, ctx, tid=None):
-    sql = "SELECT id, terminal_id, time, emp, name, att_status FROM events WHERE date=?"
+    sql = ("SELECT id, terminal_id, time, emp, name, att_status, manual_kind, manual_by, manual_at "
+           "FROM events WHERE date=?")
     args = [d]
     if tid:
         sql += " AND terminal_id=?"
@@ -3934,7 +3965,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, month_summary(qs.get("month") or today[:7], tid))
             if p == "/api/person":
                 g = day_groups(qs.get("date", ""), make_ctx(), tid).get(qs.get("key", ""))
-                evs = [{"id": e["id"], "time": e["time"], "kind": e["kind"], "terminal": e["terminal"]}
+                evs = [{"id": e["id"], "time": e["time"], "kind": e["kind"], "terminal": e["terminal"],
+                        "manual": e["manual_kind"] in MANUAL_KINDS, "manual_by": e["manual_by"],
+                        "manual_at": e["manual_at"]}
                        for e in (g["evs"] if g else [])]
                 return self.send(200, {"events": evs})
             m = re.fullmatch(r"/api/jobs/(\d+)", p)
@@ -4084,6 +4117,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(*term_clock_now(body))
             if p == "/api/terminals/user/add":
                 return self.send(*add_term_user_manual(body))
+            if p == "/api/events/kind":
+                return self.send(*set_event_kind(body, me))
             if p == "/api/staff/save":
                 return self.send(*save_staff(body))
             if p == "/api/staff/delete":
