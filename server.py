@@ -12,6 +12,7 @@ Faqat Python standart kutubxonasi ishlatiladi — hech narsa o'rnatish shart ema
 import base64
 import calendar
 import csv
+import email.utils
 import hashlib
 import hmac
 import html
@@ -221,6 +222,10 @@ class DB:
             CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY, date TEXT, fund TEXT, article TEXT,
                 cashbox TEXT, amount REAL, currency TEXT, comment TEXT, created TEXT, author TEXT, fetched REAL);
             CREATE INDEX IF NOT EXISTS exp_date ON expenses(date);
+            CREATE TABLE IF NOT EXISTS term_log(id INTEGER PRIMARY KEY AUTOINCREMENT, terminal_id INTEGER,
+                serial INTEGER, time TEXT, date TEXT, major INTEGER, minor INTEGER, picture_url TEXT, note TEXT,
+                UNIQUE(terminal_id, major, serial));
+            CREATE INDEX IF NOT EXISTS tlog_time ON term_log(terminal_id, time);
             """)
             tcols = [r[1] for r in c.execute("PRAGMA table_info(terminals)")]
             if "active" not in tcols:
@@ -338,6 +343,247 @@ def add_event(tid, ev):
                  ev.get("currentVerifyMode") or "", ev.get("pictureURL") or ""))
 
 
+# ----------------------------------------------------------------- terminal jurnali (tanilmagan yuz, nosozliklar)
+FACE_FAIL = 76          # major 5: yuz tanilmadi (bazada yo'q yoki tanib bo'lmadi)
+DOOR_CMDS = {"open": (1, "Eshik ochildi"), "close": (2, "Eshik yopildi (oddiy holat)"),
+             "alwaysOpen": (3, "Eshik doim ochiq qilindi"), "alwaysClose": (4, "Eshik doim yopiq qilindi")}
+LOG_KINDS = {   # (major, minor) -> (tur, matn). major 0 — dashboarddan berilgan eshik buyrug'i
+    (5, FACE_FAIL): ("unknown", "Tanilmagan yuz"),
+    (1, 1028): ("tamper", "Korpus ochildi (buzib ochishdan himoya)"),
+    (1, 1029): ("tamper_ok", "Korpus himoyasi tiklandi"),
+    (2, 39): ("net_off", "Tarmoq (Wi-Fi) uzildi"),
+    (2, 1031): ("net_on", "Tarmoq tiklandi"),
+    (2, 1024): ("power_on", "Terminal yoqildi (tok kelgan yoki qayta ishga tushgan)"),
+    (2, 1025): ("power_off", "Terminal o'chdi"),
+    (2, 1026): ("restart", "Terminal o'zini qayta ishga tushirdi"),
+    **{(0, n): ("door", t) for n, t in DOOR_CMDS.values()},
+}
+
+
+def _int(v, default=None):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def log_kind(major, minor):
+    k = LOG_KINDS.get((major, minor))
+    if k:
+        return k
+    return "other", f"{ {1: 'Signal', 2: 'Nosozlik'}.get(major, 'Hodisa') } (kod {minor})"
+
+
+def add_log(tid, ev, note=None):
+    major, minor, t = _int(ev.get("major")), _int(ev.get("minor")), ev.get("time")
+    if major is None or minor is None or not t:
+        return None
+    serial = _int(ev.get("serialNo"))
+    if serial is None:
+        serial = int(hashlib.md5(f"{t}|{major}|{minor}".encode()).hexdigest()[:12], 16)
+    if db.q("SELECT 1 FROM term_log WHERE terminal_id=? AND major=? AND serial=?", (tid, major, serial)):
+        return None
+    return db.x("INSERT OR IGNORE INTO term_log(terminal_id, serial, time, date, major, minor, picture_url, note) "
+                "VALUES(?,?,?,?,?,?,?,?)", (tid, serial, t, t[:10], major, minor, ev.get("pictureURL") or "",
+                                            (note or "")[:64]))
+
+
+def _log_photo_path(r):
+    return os.path.join(PHOTOS, f"log{r['terminal_id']}_{r['major']}_{r['serial']}.jpg")
+
+
+def get_log_photo(lid):
+    r = db.q("SELECT terminal_id, serial, major, picture_url FROM term_log WHERE id=?", (lid,))
+    if not r:
+        return None
+    r = r[0]
+    fp = _log_photo_path(r)
+    if os.path.exists(fp):
+        with open(fp, "rb") as f:
+            return f.read()
+    if not r["picture_url"]:
+        return None
+    data = _download(device_of(r["terminal_id"]), r["picture_url"])
+    if data and data[:2] == b"\xff\xd8":
+        with open(fp, "wb") as f:
+            f.write(data)
+        return data
+    return None
+
+
+def _internet_time():
+    """Ishonchli manba vaqti (HTTPS javobidagi Date sarlavhasi). Ulanib bo'lmasa — None."""
+    host = urlsplit(CFG.get("cloud_url") or "").hostname or "www.google.com"
+    try:
+        conn = http.client.HTTPSConnection(host, timeout=8)
+        try:
+            t0 = time.time()
+            conn.request("HEAD", "/")
+            r = conn.getresponse()
+            r.read()
+            d = r.getheader("Date")
+        finally:
+            conn.close()
+        return email.utils.parsedate_to_datetime(d).timestamp() + (time.time() - t0) / 2 if d else None
+    except Exception:
+        return None
+
+
+CLOCK_LOCK = threading.Lock()
+
+
+def sync_clock(tid, dev, state, force=False):
+    """Terminal soatini tekshiradi va (farq >= 3 s yoki force) kompyuter soatiga to'g'rilaydi.
+    Kompyuter soati internet vaqtidan 3 soniyadan ko'p farq qilsa — terminalni o'zgartirmaydi."""
+    with CLOCK_LOCK:
+        st, _, data = dev.request("GET", "/ISAPI/System/time", fatal=False)
+        if st != 200:
+            raise RuntimeError(f"soat o'qilmadi (HTTP {st})")
+        x = data.decode("utf-8", "replace")
+        g = lambda tag: (re.search(f"<{tag}>([^<]*)</{tag}>", x) or [None, ""])[1].strip()
+        now = now_local()
+        drift = round((parse_time(g("localTime")) - now).total_seconds())
+        clock = {**(state.get("clock") or {}), "checked": fmt_time(now), "drift": drift, "mode": g("timeMode"),
+                 "error": None}
+        if force or abs(drift) >= 3:
+            ref = _internet_time()
+            pc_off = round(time.time() - ref) if ref else None
+            if pc_off is not None and abs(pc_off) > 3:
+                clock["error"] = (f"Kompyuter soati internet vaqtidan {abs(pc_off)} soniya "
+                                  f"{'oldinda' if pc_off > 0 else 'orqada'} — terminal soati o'zgartirilmadi. "
+                                  "Avval kompyuter soatini to'g'rilang (Windows: Sana va vaqt → Hozir sinxronlash).")
+            else:
+                tz = g("timeZone")
+                for lt in (fmt_time(now_local()), now_local().strftime("%Y-%m-%dT%H:%M:%S")):
+                    body = ('<?xml version="1.0" encoding="UTF-8"?><Time version="2.0" '
+                            'xmlns="http://www.isapi.org/ver20/XMLSchema"><timeMode>manual</timeMode>'
+                            f"<localTime>{lt}</localTime>" + (f"<timeZone>{html.escape(tz)}</timeZone>" if tz else "")
+                            + "</Time>")
+                    st, _, _ = dev.request("PUT", "/ISAPI/System/time", body.encode(), ctype="application/xml",
+                                           fatal=False)
+                    if st == 200:
+                        break
+                if st == 200:
+                    clock.update(synced=fmt_time(now_local()), drift_before=drift, drift=0,
+                                 ref="internet" if ref else "kompyuter")
+                else:
+                    clock["error"] = f"Terminal soatni qabul qilmadi (HTTP {st})"
+        state["clock"] = clock
+        return clock
+
+
+def term_clock_now(b):
+    tid = _int(b.get("terminal_id"), 0)
+    t = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not t:
+        return 404, {"error": "Terminal topilmadi"}
+    if CLOUD and not DEMO:
+        return queue_job("clock", tid, {"terminal_id": tid})
+    if DEMO:
+        return 200, {"ok": True, "clock": {"drift": 0, "synced": fmt_time(now_local())}}
+    dev = device_of(tid)
+    if not dev:
+        return 502, {"error": f"{t[0]['name']} terminaliga hozir ulanib bo'lmayapti"}
+    try:
+        c = sync_clock(tid, dev, TSTATE.setdefault(tid, {}), force=True)
+    except Exception as e:
+        return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
+    if c.get("error"):
+        return 400, {"error": c["error"]}
+    return 200, {"ok": True, "clock": c}
+
+
+def door_control(b, by=""):
+    """Eshikni masofadan boshqarish: open (bir martaga ochadi), close, alwaysOpen, alwaysClose."""
+    tid, cmd = _int(b.get("terminal_id"), 0), str(b.get("cmd") or "")
+    by = str(b.get("by") or by or "")[:32]
+    if cmd not in DOOR_CMDS:
+        return 400, {"error": "Noto'g'ri buyruq"}
+    t = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not t:
+        return 404, {"error": "Terminal topilmadi"}
+    if not t[0]["active"]:
+        return 409, {"error": f"{t[0]['name']} terminali o'chirib qo'yilgan"}
+    if CLOUD and not DEMO:
+        return queue_job("door", tid, {"terminal_id": tid, "cmd": cmd, "by": by})
+    if not DEMO:
+        dev = device_of(tid)
+        if not dev:
+            return 502, {"error": f"{t[0]['name']} terminaliga hozir ulanib bo'lmayapti"}
+        body = ('<?xml version="1.0" encoding="UTF-8"?><RemoteControlDoor version="2.0" '
+                f'xmlns="http://www.isapi.org/ver20/XMLSchema"><cmd>{cmd}</cmd></RemoteControlDoor>')
+        try:
+            st, _, data = dev.request("PUT", "/ISAPI/AccessControl/RemoteControl/door/1", body.encode(),
+                                      ctype="application/xml", fatal=False)
+        except Exception as e:
+            return 502, {"error": f"Terminalga ulanib bo'lmadi: {e}"}
+        if st != 200:
+            x = data.decode("utf-8", "replace")
+            why = (re.search(r"<subStatusCode>([^<]*)<", x) or re.search(r"<statusString>([^<]*)<", x) or [0, f"HTTP {st}"])[1]
+            return 400, {"error": f"Terminal buyruqni bajarmadi: {why}"}
+        p = POLLERS.get(tid)
+        if p:
+            p.health_at = 0    # eshik holati tezroq yangilansin
+    n = now_local()
+    add_log(tid, {"major": 0, "minor": DOOR_CMDS[cmd][0], "time": fmt_time(n), "serialNo": int(n.timestamp() * 1000)},
+            note=by)
+    return 200, {"ok": True}
+
+
+def term_overview(tid, days=30):
+    t = db.q("SELECT id, name, host, active FROM terminals WHERE id=?", (tid,))
+    if not t:
+        return 404, {"error": "Terminal topilmadi"}
+    st = TSTATE.get(tid, {})
+    since = (now_local() - timedelta(days=days - 1)).strftime("%Y-%m-%d")   # days=1 — faqat bugun
+    rows = db.q("SELECT id, terminal_id, serial, time, major, minor, picture_url, note FROM term_log "
+                "WHERE terminal_id=? AND date>=? ORDER BY time DESC, id DESC LIMIT 600", (tid, since))
+    counts, log = {}, []
+    for r in rows:
+        kind, label = log_kind(r["major"], r["minor"])
+        counts[kind] = counts.get(kind, 0) + 1
+        log.append({"id": r["id"], "time": r["time"], "kind": kind, "label": label, "by": r["note"] or "",
+                    "photo": bool(r["picture_url"]) or os.path.exists(_log_photo_path(r))})
+    passed = db.q("SELECT COUNT(*) n FROM events WHERE terminal_id=? AND date>=?", (tid, since))[0]["n"]
+    return 200, {"terminal": t[0], "days": days, "connected": st.get("connected", False), "office": bool(st.get("office")),
+                 "last_poll": st.get("last_poll"), "error": st.get("error"), "health": st.get("health"),
+                 "clock": st.get("clock"), "counts": counts, "passed": passed, "log": log, "cloud": CLOUD,
+                 "now": fmt_time(now_local())}
+
+
+def receive_log(tid, token, b):
+    """Bulut: ofisdagi nusxadan terminal jurnali (tanilmagan yuzlar rasmi bilan, nosozliklar, eshik buyruqlari)."""
+    rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
+    if not rows or not hmac.compare_digest(push_token(rows[0]), token):
+        return 404, {"error": "topilmadi"}
+    n = 0
+    for it in (b.get("rows") or [])[:20]:
+        t = str(it.get("time") or "")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2})?", t):
+            continue
+        ev = {"major": it.get("major"), "minor": it.get("minor"), "time": t, "serialNo": it.get("serial")}
+        lid = add_log(tid, ev, note=str(it.get("note") or ""))
+        if not lid:
+            continue
+        n += 1
+        if it.get("photo"):
+            try:
+                img = base64.b64decode(str(it["photo"]), validate=True)
+            except Exception:
+                img = b""
+            if img[:2] == b"\xff\xd8" and len(img) < 400 * 1024:
+                r = db.q("SELECT terminal_id, major, serial FROM term_log WHERE id=?", (lid,))[0]
+                with open(_log_photo_path(r), "wb") as f:
+                    f.write(img)
+    return 200, {"ok": True, "added": n}
+
+
+def _last_log(tid):
+    r = db.q("SELECT time, major, serial FROM term_log WHERE terminal_id=? ORDER BY time DESC, major DESC, "
+             "serial DESC LIMIT 1", (tid,))
+    return [r[0]["time"], r[0]["major"], r[0]["serial"]] if r else None
+
+
 # ----------------------------------------------------------------- terminal kuzatuvchisi
 class Poller(threading.Thread):
     daemon = True
@@ -352,12 +598,14 @@ class Poller(threading.Thread):
         self.primed = False   # birinchi so'rov — eski o'tishlarni yuklash (Telegram'ga yuborilmaydi)
         self.fails = 0
         self.searched_at = 0
+        self.health_at = self.syslog_at = self.clock_at = 0
+        self.syslog_primed = False
         self.state = TSTATE.setdefault(self.tid, {})
         self.state.update(connected=False, error=None, need_login=False, last_poll=None)
 
-    def search(self, start, end):
+    def search(self, start, end, combos=None):
         out = []
-        for major, minor in self.combos:
+        for major, minor in combos or self.combos:
             pos = 0
             sid = uuid.uuid4().hex[:16]
             while True:
@@ -366,8 +614,9 @@ class Poller(threading.Thread):
                                          "startTime": fmt_time(start), "endTime": fmt_time(end)}}
                 st, j = self.device.post_json("/ISAPI/AccessControl/AcsEvent?format=json", body)
                 if st != 200:
-                    if self.combos == [(5, 0)]:
-                        self.combos = [(5, 75), (5, 1), (5, 38)]  # ba'zi proshivkalar minor=0 ni qabul qilmaydi
+                    if not combos and self.combos == [(5, 0)]:
+                        # ba'zi proshivkalar minor=0 ni qabul qilmaydi
+                        self.combos = [(5, 75), (5, 1), (5, 38), (5, FACE_FAIL)]
                         return self.search(start, end)
                     raise RuntimeError(f"AcsEvent HTTP {st}")
                 a = j.get("AcsEvent", {})
@@ -422,15 +671,80 @@ class Poller(threading.Thread):
         evs = self.search(start, now + timedelta(days=1))
         evs.sort(key=lambda e: (e.get("time", ""), e.get("serialNo") or 0))
         new_ids = [i for i in (add_event(self.tid, e) for e in evs if not self.stopped) if i]
+        # yuzi tanilmagan urinishlar (ID siz) — alohida jurnalga, rasmi bilan
+        new_logs = [i for i in (add_log(self.tid, e) for e in evs if _int(e.get("minor")) == FACE_FAIL) if i]
         if len(new_ids) <= 5:
             for i in new_ids:
                 try:
                     get_photo(i)
                 except Exception:
                     pass
+        for i in new_logs[-5:]:
+            try:
+                get_log_photo(i)
+            except Exception:
+                pass
         if self.primed:
             tg_notify(new_ids)
+            tg_notify_log(new_logs)
         self.primed = True
+        self.extras()
+
+    def extras(self):
+        """Terminal holati, nosozliklar jurnali va soat — har biri o'z oralig'ida; xatosi o'tishlarga xalal bermaydi."""
+        now = time.time()
+        for attr, gap, fn in (("health_at", 60, self.health_once), ("syslog_at", 300, self.syslog_once),
+                              ("clock_at", 1800, self.clock_once)):
+            if self.stopped or now - getattr(self, attr) < gap:
+                continue
+            setattr(self, attr, now)
+            try:
+                fn()
+            except Exception as e:
+                print(f"[terminal {self.tid}] {fn.__name__}: {e}", flush=True)
+
+    def health_once(self):
+        d = self.device
+
+        def get(path):
+            st, _, data = d.request("GET", path, fatal=False)
+            if st != 200:
+                return {}
+            try:
+                return json.loads(data.decode("utf-8", "replace") or "{}")
+            except ValueError:
+                return {}
+        ws = get("/ISAPI/AccessControl/AcsWorkStatus?format=json").get("AcsWorkStatus") or {}
+        cnt = get("/ISAPI/AccessControl/UserInfo/Count?format=json").get("UserInfoCount") or {}
+        first = lambda v: v[0] if isinstance(v, list) and v else v
+        nets = {str(n.get("netType")): n.get("netStatus") for n in ws.get("InterfaceStatusList") or []}
+        self.state["health"] = {
+            "at": fmt_time(now_local()), "ip": d.host, "wifi": ws.get("wifiStatus"), "lan": nets.get("1"),
+            "door_lock": first(ws.get("doorLockStatus")), "door": first(ws.get("doorStatus")),
+            "magnetic": first(ws.get("magneticStatus")), "tamper": ws.get("hostAntiDismantleStatus"),
+            "users": cnt.get("userNumber"), "faces": cnt.get("bindFaceUserNumber"),
+            "fingers": cnt.get("bindFingerprintUserNumber"), "cards": cnt.get("bindCardUserNumber"),
+            **{k: (self.state.get("device") or {}).get(k) for k in ("model", "firmware", "serial")}}
+
+    def syslog_once(self):
+        """Signal (korpus ochilishi) va nosozliklar (tarmoq uzilishi, qayta yoqilish) — terminal jurnalidan."""
+        now = now_local()
+        ids = []
+        for major, minor in ((1, 0), (2, 0), (5, FACE_FAIL)):   # tanilmagan yuz: o'tgan kunlar ham to'ldiriladi
+            last = db.q("SELECT MAX(time) t FROM term_log WHERE terminal_id=? AND major=?", (self.tid, major))[0]["t"]
+            start = parse_time(last) if last else (now - timedelta(days=CFG.get("backfill_days", 31))).replace(
+                hour=0, minute=0, second=0)
+            evs = self.search(start, now + timedelta(days=1), combos=[(major, minor)])
+            evs.sort(key=lambda e: (e.get("time", ""), e.get("serialNo") or 0))
+            ids += [i for i in (add_log(self.tid, e) for e in evs
+                                if major != 5 or _int(e.get("minor")) == FACE_FAIL) if i]
+        if self.syslog_primed:
+            tg_notify_log(ids)
+        self.syslog_primed = True
+
+    def clock_once(self, force=False):
+        """Terminal soatini kompyuter soati bilan solishtiradi; 3 soniyadan ko'p farq bo'lsa to'g'rilaydi."""
+        return sync_clock(self.tid, self.device, self.state, force)
 
     def moved(self):
         """Terminal javob bermasa — IP o'zgargan bo'lishi mumkin: tarmoqdan MAC/seriya bo'yicha qidiramiz."""
@@ -883,7 +1197,7 @@ CHAT_RE = re.compile(r"^(-?\d{3,20}|@\w{4,64})$")
 
 
 def tg_cfg():
-    c = {"enabled": False, "token": "", "bot": "", "chats": [], "terminals": [], "skip_repeat": True}
+    c = {"enabled": False, "token": "", "bot": "", "chats": [], "terminals": [], "skip_repeat": True, "alerts": True}
     c.update(CFG.get("telegram") or {})
     return c
 
@@ -997,11 +1311,11 @@ def tg_photo(eid, wait=True):
     return None
 
 
-def tg_deliver(c, info, photo):
+def tg_deliver(c, info, photo, text=None):
     """Hamma tanlangan chatlarga yuboradi. Natija: [(chat, ok, xato)]"""
     out, changed = [], False
     for ch in c["chats"]:
-        ok, err, new_chat = tg_send(c["token"], ch["id"], tg_caption(info), photo)
+        ok, err, new_chat = tg_send(c["token"], ch["id"], text or tg_caption(info), photo)
         if new_chat:
             ch["id"], changed = new_chat, True
         out.append((ch, ok, err))
@@ -1023,6 +1337,44 @@ def tg_notify(ids):
             TG_Q.put(i)
 
 
+TG_ALERT_KINDS = ("unknown", "tamper")
+TG_ALERT_LAST = {}   # (terminal, tur) -> oxirgi xabar vaqti: ketma-ket urinishlar bitta xabar bo'lsin
+
+
+def tg_notify_log(ids):
+    c = tg_cfg()
+    if c["enabled"] and c["token"] and c["chats"] and c["alerts"]:
+        for i in ids:
+            TG_Q.put(("log", i))
+
+
+def tg_log_alert(c, lid):
+    r = db.q("SELECT id, terminal_id, time, major, minor FROM term_log WHERE id=?", (lid,))
+    if not r:
+        return
+    r = r[0]
+    kind, label = log_kind(r["major"], r["minor"])
+    if kind not in TG_ALERT_KINDS or (c["terminals"] and r["terminal_id"] not in c["terminals"]):
+        return
+    key = (r["terminal_id"], kind)
+    if time.time() - TG_ALERT_LAST.get(key, 0) < 60:
+        return
+    TG_ALERT_LAST[key] = time.time()
+    t = r["time"]
+    title = ("🚫 <b>Tanilmagan yuz</b>", "Terminal oldidagi odam bazada yo'q yoki yuzi tanilmadi.") if kind == "unknown" \
+        else ("⚠️ <b>Terminal korpusi ochildi</b>", "Terminalni devordan olishga yoki ochishga urinish bo'lishi mumkin.")
+    text = "\n".join([title[0], "", title[1], "",
+                      f"📅 Sanasi: {t[8:10]}.{t[5:7]}.{t[0:4]}", f"🕒 Soati: {t[11:19]}",
+                      f"🏢 Terminal: {html.escape(term_names().get(r['terminal_id'], '—'))}"])
+    photo = None
+    for _ in range(4 if kind == "unknown" else 1):
+        photo = get_log_photo(lid)
+        if photo:
+            break
+        time.sleep(1.5)
+    tg_deliver(c, None, photo, text=text)
+
+
 class TgWorker(threading.Thread):
     daemon = True
 
@@ -1032,6 +1384,10 @@ class TgWorker(threading.Thread):
             try:
                 c = tg_cfg()
                 if not (c["enabled"] and c["token"] and c["chats"]):
+                    continue
+                if isinstance(eid, tuple):
+                    if c["alerts"]:
+                        tg_log_alert(c, eid[1])
                     continue
                 info = tg_event_info(eid)
                 if not info or (c["terminals"] and info["terminal_id"] not in c["terminals"]):
@@ -1048,7 +1404,7 @@ def tg_public():
     tok = c["token"]
     return {"enabled": c["enabled"], "has_token": bool(tok), "token_hint": (tok.split(":")[0] + ":…" + tok[-4:]) if tok else "",
             "bot": c["bot"], "chats": c["chats"], "terminals": c["terminals"], "skip_repeat": c["skip_repeat"],
-            "queue": TG_Q.qsize(), **TG_STATE}
+            "alerts": c["alerts"], "queue": TG_Q.qsize(), **TG_STATE}
 
 
 def tg_save(b):
@@ -1072,6 +1428,7 @@ def tg_save(b):
     c["chats"] = chats
     c["terminals"] = [int(t) for t in (b.get("terminals", c["terminals"]) or []) if str(t).isdigit()]
     c["skip_repeat"] = bool(b.get("skip_repeat", c["skip_repeat"]))
+    c["alerts"] = bool(b.get("alerts", c["alerts"]))
     c["enabled"] = bool(b.get("enabled", c["enabled"]))
     if c["enabled"] and not c["token"]:
         return 400, {"error": "Avval bot tokenini kiriting"}
@@ -2812,8 +3169,10 @@ class CloudSync(threading.Thread):
             return
         for j in json.loads(data or b"{}").get("jobs") or []:
             p = {**j["payload"], "terminal_id": t["id"]}
+            fn = {"enroll": enroll_person, "delete": remove_person, "door": door_control,
+                  "clock": term_clock_now}.get(j["kind"])
             try:
-                code, res = enroll_person(p) if j["kind"] == "enroll" else remove_person(p)
+                code, res = fn(p) if fn else (400, {"error": "Bu buyruqni ofisdagi dastur bilmaydi — yangilang"})
             except Exception as e:
                 code, res = 500, {"error": f"Ofis kompyuterida xato: {e}"}
             print(f"[bulut] buyruq #{j['id']} ({j['kind']} ID {p.get('emp')}): {code}", flush=True)
@@ -2831,13 +3190,45 @@ class CloudSync(threading.Thread):
         conn.close()
         return r.status, data
 
+    def sync_log(self, base, tid, last):
+        """Bulutda yo'q jurnal yozuvlarini (tanilmagan yuz rasmi bilan) bo'laklab yuboradi."""
+        lt, lm, ls = last if isinstance(last, list) and len(last) == 3 else ("", -1, -1)
+        for _ in range(5):
+            rows = db.q("SELECT * FROM term_log WHERE terminal_id=? AND (time, major, serial) > (?, ?, ?) "
+                        "ORDER BY time, major, serial LIMIT 8", (tid, lt, lm, ls))
+            if not rows:
+                return
+            out = []
+            for r in rows:
+                ph = None
+                if r["major"] == 5:
+                    try:
+                        ph = get_log_photo(r["id"])
+                    except Exception:
+                        ph = None
+                out.append({"time": r["time"], "major": r["major"], "minor": r["minor"], "serial": r["serial"],
+                            "note": r["note"] or "", "photo": base64.b64encode(ph).decode() if ph else None})
+            st, _ = self._post(base + "/log", json.dumps({"rows": out}).encode(), {"Content-Type": "application/json"})
+            if st != 200:
+                return
+            lt, lm, ls = rows[-1]["time"], rows[-1]["major"], rows[-1]["serial"]
+
     def sync(self, t):
         t = {**t, **db.q("SELECT mac, serial FROM terminals WHERE id=?", (t["id"],))[0]}
         base = f"/hook/{t['id']}/{push_token(t)}"
-        st, data = self._post(base + "/status", b'{"office": true}', {"Content-Type": "application/json"})
+        ts = TSTATE.get(t["id"], {})
+        st, data = self._post(base + "/status", json.dumps({"office": True, "health": ts.get("health"),
+                                                            "clock": ts.get("clock")}, ensure_ascii=False).encode(),
+                              {"Content-Type": "application/json"})
         if st != 200:
             return
-        last = (json.loads(data or b"{}").get("last_event") or {}).get("time") or ""
+        resp = json.loads(data or b"{}")
+        if "last_log" in resp:    # eski bulut versiyasi jurnalni qabul qilmaydi
+            try:
+                self.sync_log(base, t["id"], resp.get("last_log"))
+            except Exception as e:
+                print(f"[bulut] jurnal sinxron xatosi: {e}", flush=True)
+        last = (resp.get("last_event") or {}).get("time") or ""
         evs = db.q("SELECT * FROM events WHERE terminal_id=? AND time>? ORDER BY time LIMIT 200", (t["id"], last))
         for e in evs:
             ev = {"dateTime": e["time"], "eventType": "AccessControllerEvent",
@@ -2931,7 +3322,7 @@ def add_term_user_manual(b):
     return 200, {"ok": True}
 
 
-def push_status(tid, token, office=False):
+def push_status(tid, token, office=False, b=None):
     rows = db.q("SELECT * FROM terminals WHERE id=?", (tid,))
     if not rows or not hmac.compare_digest(push_token(rows[0]), token):
         return 404, {"error": "topilmadi"}
@@ -2940,11 +3331,15 @@ def push_status(tid, token, office=False):
         st = TSTATE.setdefault(tid, {})
         st.update(connected=True, error=None, need_login=False, push=True, office=True,
                   last_poll=fmt_time(now_local()))
+        for k in ("health", "clock"):   # terminal holati va soati — ofis o'qigan ko'rinishda
+            if isinstance((b or {}).get(k), dict) and len(json.dumps(b[k])) < 4000:
+                st[k] = b[k]
     last = db.q("SELECT time, emp FROM events WHERE terminal_id=? ORDER BY time DESC LIMIT 1", (tid,))
     users = [r["emp"] for r in db.q("SELECT emp FROM term_users WHERE terminal_id=?", (tid,))]
     return 200, {"last_push": st.get("last_poll"), "connected": st.get("connected"), "forward": bool(forward_url(tid)),
                  "term_users": sorted(users),
-                 "forward_state": FWD_STATE.get(tid, {}), "last_event": last[0] if last else None}
+                 "forward_state": FWD_STATE.get(tid, {}), "last_event": last[0] if last else None,
+                 "last_log": _last_log(tid)}
 
 
 def handle_push(tid, token, ctype, body, replay=False):
@@ -3504,6 +3899,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, stock_report() if p.endswith("stock") else debts_report())
                 except BillzError as e:
                     return self.send(200, {"connected": True, "error": str(e)})
+            if p == "/api/term/overview":
+                try:
+                    days = min(90, max(1, int(qs.get("days") or 30)))
+                except ValueError:
+                    days = 30
+                return self.send(*term_overview(tid or 0, days))
+            m = re.fullmatch(r"/logphoto/(\d+)", p)
+            if m:
+                r = get_log_photo(int(m.group(1)))
+                return self.send(200, r, "image/jpeg", {"Cache-Control": "private, max-age=86400"}) if r else self.send(404, b"", "text/plain")
             if p == "/api/salesdoc":
                 return self.send(200, sd_public())
             if p == "/api/oyliklar":
@@ -3570,7 +3975,7 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path
         if p == "/api/backup/restore":
             return self.restore_upload()
-        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status|users|jobs|jobresult)", p)
+        m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})/(forward|status|users|jobs|jobresult|log)", p)
         if m:
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -3579,9 +3984,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": "Noto'g'ri so'rov"})
             tid, tok, what = int(m.group(1)), m.group(2), m.group(3)
             fn = {"forward": lambda: set_forward(tid, tok, b),
-                  "status": lambda: push_status(tid, tok, office=b.get("office") is True),
+                  "status": lambda: push_status(tid, tok, office=b.get("office") is True, b=b),
                   "users": lambda: receive_users(tid, tok, b), "jobs": lambda: jobs_for_office(tid, tok),
-                  "jobresult": lambda: job_result(tid, tok, b)}[what]
+                  "jobresult": lambda: job_result(tid, tok, b),
+                  "log": lambda: receive_log(tid, tok, b)}[what]
             return self.send(*fn())
         m = re.fullmatch(r"/hook/(\d+)/([0-9a-f]{32})", p)
         if m:
@@ -3672,6 +4078,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(*enroll_person(body))
             if p == "/api/terminals/person/delete":
                 return self.send(*remove_person(body))
+            if p == "/api/term/door":
+                return self.send(*door_control({k: body.get(k) for k in ("terminal_id", "cmd")}, by=me))
+            if p == "/api/term/clock":
+                return self.send(*term_clock_now(body))
             if p == "/api/terminals/user/add":
                 return self.send(*add_term_user_manual(body))
             if p == "/api/staff/save":
