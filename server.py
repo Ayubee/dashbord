@@ -113,6 +113,7 @@ class Device:
         self.nc = 0
         self.lock = threading.Lock()
         self.disabled = False
+        self.ok = False   # shu parol bilan kamida bir marta kirilgan (parol to'g'riligi isbotlangan)
 
     @staticmethod
     def _md5(s):
@@ -143,7 +144,10 @@ class Device:
         with self.lock:
             # Terminal bitta nonce'ni bir necha marta qabul qiladi, keyin sarlavhasiz 401 qaytaradi.
             # Shunda yangi nonce olib qayta urinamiz. Faqat YANGI nonce bilan ham 401 bo'lsa — parol xato.
-            for attempt in range(3):
+            # Lekin ba'zan terminal to'g'ri parolni ham tasodifan rad etadi (yangi nonce bilan ham 401) —
+            # parol oldin ishlagan bo'lsa (self.ok), biroz kutib bir necha marta qayta urinamiz.
+            tries = 10 if self.ok else 3
+            for attempt in range(tries):
                 conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
                 headers = {}
                 if body is not None:
@@ -162,12 +166,17 @@ class Device:
                     chal = {k: (v1 or v2) for k, v1, v2 in re.findall(r'(\w+)=(?:"([^"]*)"|([^,\s]*))', wa)}
                     self.chal = chal if "nonce" in chal else None
                     self.nc = 0
-                    if not fresh and attempt < 2:
+                    if not fresh and attempt < tries - 1:
+                        continue
+                    if self.ok and attempt < tries - 1:
+                        time.sleep(0.5)
                         continue
                     print(f"[401] {self.host} {method} {path}", flush=True)
                     if fatal:
                         self.disabled = True  # terminal akkauntni bloklamasligi uchun to'xtaymiz
                     raise AuthError("Login yoki parol noto'g'ri")
+                if self.chal:
+                    self.ok = True
                 return r.status, r.getheader("Content-Type") or "", data
 
     def post_json(self, path, obj, fatal=True):
@@ -596,6 +605,7 @@ class Poller(threading.Thread):
         super().__init__()
         self.tid = t["id"]
         self.device = Device(t["host"], t["port"], t["username"], t["password"])
+        self.device.ok = True   # bazadagi parol terminal qo'shilganda tekshirilgan
         self.combos = [(5, 0)]
         self.users_at = 0
         self.stopped = False
@@ -761,6 +771,7 @@ class Poller(threading.Thread):
             return False
         d = self.device
         self.device = Device(new[0], new[1], d.user, d.password)
+        self.device.ok = d.ok
         self.state["device"] = None
         self.fails = 0
         return True
