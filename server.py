@@ -601,6 +601,7 @@ class Poller(threading.Thread):
         self.stopped = False
         self.primed = False   # birinchi so'rov — eski o'tishlarni yuklash (Telegram'ga yuborilmaydi)
         self.fails = 0
+        self.auth_fails = 0
         self.searched_at = 0
         self.health_at = self.syslog_at = self.clock_at = 0
         self.syslog_primed = False
@@ -768,15 +769,26 @@ class Poller(threading.Thread):
         while not self.stopped:
             try:
                 self.poll_once()
-                self.fails = 0
+                self.fails = self.auth_fails = 0
                 self.state.update(connected=True, error=None, need_login=False, last_poll=fmt_time(now_local()))
             except AuthError as e:
                 # IP boshqa qurilmaga o'tib qolgan bo'lishi mumkin — avval terminalimizni qidirib ko'ramiz
                 if self.moved():
                     continue
+                # 401 ba'zan bir martalik bo'ladi (Wi-Fi uzilib-ulanganda, qayta yoqilganda) — butunlay to'xtamaymiz,
+                # lekin akkaunt bloklanmasligi uchun tobora uzoqroq kutib qayta urinamiz: 1, 5, keyin har 15 daqiqa.
+                self.auth_fails += 1
+                wait = (60, 300, 900)[min(self.auth_fails, 3) - 1]
                 self.state.update(connected=False, need_login=True,
-                                  error=f"{e}. Sozlamalar → Terminallar bo'limida login/parolni yangilang.")
-                return
+                                  error=f"{e}. {wait // 60} daqiqadan keyin qayta uriniladi. Parol o'zgargan bo'lsa — "
+                                        "Sozlamalar → Terminallar bo'limida login/parolni yangilang.")
+                print(f"[terminal {self.tid}] 401 — {wait} s dan keyin qayta urinish ({self.auth_fails})", flush=True)
+                for _ in range(wait):
+                    if self.stopped:
+                        return
+                    time.sleep(1)
+                self.device.disabled = False
+                continue
             except Exception as e:
                 self.fails += 1
                 if self.fails >= 3 and self.moved():
